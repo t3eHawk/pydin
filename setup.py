@@ -5,7 +5,7 @@ import setuptools
 with open('README.md', 'r') as fh:
     long_description = fh.read()
 
-install_requires = []
+install_requires = ['pepperoni', 'sqlalchemy', 'cx_Oracle', 'paramiko']
 
 author = devoe.__author__
 email = devoe.__email__

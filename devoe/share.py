@@ -1,0 +1,2 @@
+connections = {}
+pipeline = None
