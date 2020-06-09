@@ -1,0 +1,37 @@
+       __
+  ____/ /__ _   ______  ___
+ / __  / _ \ | / / __ \/ _ \
+/ /_/ /  __/ |/ / /_/ /  __/
+\__,_/\___/|___/\____/\___/
+
+
+List of available commands:
+
+create scheduler   {create_scheduler}
+start scheduler    {start_scheduler}
+stop scheduler     {stop_scheduler}
+restart scheduler  {restart_scheduler}
+
+create job         {create_job}
+edit script        {edit_script}
+configure job      {configure_job}
+enable job         {enable_job}
+disable job        {disable_job}
+delete job         {delete_job}
+list jobs          {list_jobs}
+
+run job            {run_job}
+run jobs           {run_jobs}
+cancel job         {cancel_job}
+cancel jobs        {cancel_jobs}
+cancel run         {cancel_run}
+
+create config      {create_config}
+edit config        {edit_config}
+
+create repo        {create_repo}
+sync repo          {sync_repo}
+
+help               Show this message.
+
+For more details type *[command] help*.

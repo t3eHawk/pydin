@@ -1,28 +1,28 @@
 devoe
 =====
 
-Devoe is a Python ETL framework allowing you to create pipelines and customize
-your ETL process as you wish.
+Devoe is a Python ETL framework that allows you to develop, setup and maintain
+ETL processes.
 
-Features
---------
+This module was originally a simple standalone script on a small server to run
+a dozen of jobs.
 
-Installation
-------------
-```
-$ pip install devoe
-```
+But with a growth of our project we understood that there is nothing in public
+repositories that will cover all our requierments without significant
+workarounds.
+So we just decided that this script must evolve together with a project and
+must become something else.
 
-How to use
-----------
-Below is the example of simple ETL task to extract data from one table to
-another.
-```python
-import devoe as de
+Devoe follows certain ETL phisolophy that was born in our own expirience.
+It was created to work in real production environment with thoushands of
+daily jobs.
 
+Framework includes serveral elements that makes creation of ETL processes with
+Python more convinient.
+But it is always up to you whether to use standard approaches promoted by us
+or not. If not - it is ok because module gives you possibility to redefine
+almost all main elements. That is what makes it a framework and not a regular
+module.
 
-select = de.Select(database='billing', file='select.sql')
-table = de.Table(database='dwh', schema='billing', name='invoices')
-pipeline = de.Pipeline(select, table)
-pipeline.run()
-```
+This document will be updated as soon as possible to provide all necessary
+details for final users.

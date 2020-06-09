@@ -1,0 +1,13 @@
+"""Job."""
+
+import devoe
+
+
+if __name__ == '__main__':
+    job = devoe.Job()
+else:
+    job = devoe.cache.Job
+    logger = job.logger
+    sysinfo = job.sysinfo
+    creds = job.creds
+    email = job.email
