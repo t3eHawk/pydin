@@ -5,7 +5,8 @@ import pepperoni as pe
 from .config import config
 
 
-logger = pe.logger(console=config['LOGGING'].get('console'),
+logger = pe.logger('devoe.core.logger',
+                   console=config['LOGGING'].get('console'),
                    file=config['LOGGING'].get('file'),
                    info=config['LOGGING'].get('info'),
                    debug=config['LOGGING'].get('debug'),
