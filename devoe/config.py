@@ -98,144 +98,286 @@ class Configurator(dict):
 
 
 class Logging():
-    """Represents special configurator used in table logger of ETL tasks."""
+    """Represents a special configurator for the tasks and steps loggers."""
 
-    def __init__(self, database=None, table=None, schema=None,
-                 records_read=True, records_written=True,
-                 records_updated=True, records_merged=True,
-                 files_read=True, files_written=True,
-                 bytes_read=True, bytes_written=True,
-                 errors_found=True, initiator=True,
-                 file_log=False, text_log=False, text_error=False):
+    def __init__(self, task=True, step=False, database=None,
+                 schema=None, table=None,  **fields):
         self.metadata = sa.MetaData()
-        self.database = database if isinstance(database, str) else None
-        self.table = table if isinstance(table, str) else None
-        self.schema = schema if isinstance(schema, str) else None
 
-        self.records_read = None
-        if isinstance(records_read, bool):
-            self.records_read = records_read
-        self.records_written = None
-        if isinstance(records_written, bool):
-            self.records_written = records_written
-        self.records_updated = None
-        if isinstance(records_updated, bool):
-            self.records_updated = records_updated
-        self.records_merged = None
-        if isinstance(records_merged, bool):
-            self.records_merged = records_merged
-        self.files_read = None
-        if isinstance(files_read, bool):
-            self.files_read = files_read
-        self.files_written = None
-        if isinstance(files_written, bool):
-            self.files_written = files_written
-        self.bytes_read = None
-        if isinstance(bytes_read, bool):
-            self.bytes_read = bytes_read
-        self.bytes_written = None
-        if isinstance(bytes_written, bool):
-            self.bytes_written = bytes_written
-        self.errors_found = None
-        if isinstance(errors_found, bool):
-            self.errors_found = errors_found
-        self.initiator = None
-        if isinstance(initiator, bool):
-            self.initiator = initiator
-        self.file_log = None
-        if isinstance(file_log, bool):
-            self.file_log = file_log
-        self.text_log = None
-        if isinstance(text_log, bool):
-            self.text_log = text_log
-        self.text_error = None
-        if isinstance(text_error, bool):
-            self.text_error = text_error
+        if task is False:
+            self.task = self.Task(self, table=None)
+        elif isinstance(task, dict):
+            self.task = self.Task(self, table=task.get('table', table),
+                                  schema=task.get('schema', schema),
+                                  database=task.get('database', database),
+                                  **task.get('fields', fields))
+        else:
+            table = table if not isinstance(task, str) else task
+            self.task = self.Task(self, table=table, schema=schema,
+                                  database=database, **fields)
+
+        if step is False:
+            self.step = self.Step(self, table=True)
+        elif isinstance(step, dict):
+            self.step = self.Step(self, table=step.get('table', step),
+                                  schema=step.get('schema', schema),
+                                  database=step.get('database', database),
+                                  **step.get('fields', {}))
+        else:
+            table = None if not isinstance(step, str) else step
+            self.step = self.Step(self, table=table, schema=schema,
+                                  database=database)
         pass
 
-    def setup(self):
-        """Configure database logger."""
-        logger = pe.logger('devoe.task.logger', table=True,
-                           console=False, file=False, email=False)
-        # If no table is mentioned then the logging is off and all writes
-        # to it must be omitted.
-        if self.table is None:
-            logger.configure(table=False)
-        else:
-            name = self.database
-            database = nodemaker.create(name) if name is not None else None
-            # If no database provided but table name is mentioned then the
-            # application database will be used.
-            if database is None:
-                module = il.import_module('devoe.db')
-                database = module.db
-            if not database.engine.has_table(self.table):
-                self.create_table(database)
-            logger.configure(db={'database': database, 'name': self.table})
-        return logger
+    class Task():
+        """Represents a generator for the task logger."""
 
-    def create_table(self, database):
-        """Create database table used for logging."""
-        vendor = database.vendor
-        name = self.table
-        schema = self.schema
-        metadata = self.metadata
-        columns = [sa.Column('id', sa.Integer, sa.Sequence(f'{name}_seq'),
-                             primary_key=True, comment='Unique ETL task ID'),
-                   sa.Column('job_id', sa.Integer,
-                             comment='Job that performed this task'),
-                   sa.Column('run_id', sa.Integer,
-                             comment='Run that performed this task'),
-                   sa.Column('run_date', sa.DateTime,
-                             comment='Date for which task was performed'),
-                   sa.Column('updated', sa.DateTime,
-                             comment='Date of this records change'),
-                   sa.Column('start_date', sa.DateTime,
-                             comment='Date when this task started'),
-                   sa.Column('end_date', sa.DateTime,
-                             comment='Date when this task ended'),
-                   sa.Column('status', sa.String(1),
-                             comment=('Current task status. '
-                                      'R - running, D - Done, E - error')),
-                   sa.Column('records_read', sa.Integer,
-                             comment='Total number of read records'),
-                   sa.Column('records_written', sa.Integer,
-                             comment='Total number of written records'),
-                   sa.Column('records_updated', sa.Integer,
-                             comment='Total number of updated records'),
-                   sa.Column('records_merged', sa.Integer,
-                             comment='Total number of merged records'),
-                   sa.Column('files_read', sa.Integer,
-                             comment='Total number of read files'),
-                   sa.Column('files_written', sa.Integer,
-                             comment='Total number of written files'),
-                   sa.Column('bytes_read', sa.Integer,
-                             comment='Total volume of read bytes'),
-                   sa.Column('bytes_written', sa.Integer,
-                             comment='Total volume of written bytes'),
-                   sa.Column('errors_found', sa.Integer,
-                             comment='Total number of occurred errors'),
-                   sa.Column('initiator', sa.String(30),
-                             comment='OS user who initiated this task'),
-                   sa.Column('file_log', sa.String(30),
-                             comment='Name of log file used for this task'),
-                   sa.Column('text_log', sa.Text,
-                             comment='Textual log of this task'),
-                   sa.Column('text_error', sa.Text,
-                             comment='Textual error that happened in task')]
-        columns = [column for column in columns
-                   if getattr(self, column.name, True) is True]
-        table = sa.Table(name, metadata, *columns, schema=schema,
-                         oracle_compress=True if vendor == 'oracle' else None)
-        table.create(database.engine, checkfirst=True)
-        return table
+        def __init__(self, logging, database=None,
+                     schema=None, table=None, **fields):
+            self.logging = logging if isinstance(logging, Logging) else None
+            self.database = database if isinstance(database, str) else None
+            if isinstance(database, Database) is True:
+                self.database = database
+            elif isinstance(database, str):
+                self.database = nodemaker.create(database)
+            else:
+                module = il.import_module('devoe.db')
+                self.database = module.db
+            self.schema = schema if isinstance(schema, str) else None
+            self.table = table if isinstance(table, str) else None
+            self.fields = {'records_read': True,
+                           'records_written': True,
+                           'records_updated': True,
+                           'records_merged': True,
+                           'files_read': True,
+                           'files_written': True,
+                           'bytes_read': True,
+                           'bytes_written': True,
+                           'errors_found': True,
+                           'initiator': False,
+                           'server': False,
+                           'user': False,
+                           'file_log': False,
+                           'text_log': False,
+                           'text_error': False}
+            self.change(**fields)
+            pass
+
+        def change(self, **fields):
+            """Modify table structure."""
+            for key, value in fields.items():
+                if key in self.fields.keys():
+                    if isinstance(value, bool):
+                        self.fields[key] = value
+            pass
+
+        def create_table(self):
+            """Create database table used for logging."""
+            name = self.table
+            schema = self.schema
+            metadata = self.logging.metadata
+            columns = [sa.Column('id', sa.Integer, sa.Sequence(f'{name}_seq'),
+                                 primary_key=True,
+                                 comment='Unique task ID'),
+                       sa.Column('job_id', sa.Integer,
+                                 comment='Job that performed this task'),
+                       sa.Column('run_id', sa.Integer,
+                                 comment='Run that performed this task'),
+                       sa.Column('run_date', sa.DateTime,
+                                 comment='Date for which task was performed'),
+                       sa.Column('task_name', sa.String(30),
+                                 comment='Name of the task'),
+                       sa.Column('updated', sa.DateTime,
+                                 comment='Date of this record change'),
+                       sa.Column('start_date', sa.DateTime,
+                                 comment='Date when task started'),
+                       sa.Column('end_date', sa.DateTime,
+                                 comment='Date when task ended'),
+                       sa.Column('status', sa.String(1),
+                                 comment='Current status.'),
+                       sa.Column('records_read', sa.Integer,
+                                 comment='Total number of read records'),
+                       sa.Column('records_written', sa.Integer,
+                                 comment='Total number of written records'),
+                       sa.Column('records_updated', sa.Integer,
+                                 comment='Total number of updated records'),
+                       sa.Column('records_merged', sa.Integer,
+                                 comment='Total number of merged records'),
+                       sa.Column('files_read', sa.Integer,
+                                 comment='Total number of read files'),
+                       sa.Column('files_written', sa.Integer,
+                                 comment='Total number of written files'),
+                       sa.Column('bytes_read', sa.Integer,
+                                 comment='Total volume of read bytes'),
+                       sa.Column('bytes_written', sa.Integer,
+                                 comment='Total volume of written bytes'),
+                       sa.Column('errors_found', sa.Integer,
+                                 comment='Total number of occurred errors'),
+                       sa.Column('initiator', sa.String(30),
+                                 comment='OS user who initiated the task'),
+                       sa.Column('server', sa.String(30),
+                                 comment='Host address with process'),
+                       sa.Column('user', sa.String(30),
+                                 comment='OS user who launched the process'),
+                       sa.Column('file_log', sa.String(30),
+                                 comment='Path to the log file'),
+                       sa.Column('text_log', sa.Text,
+                                 comment='Textual log records'),
+                       sa.Column('text_error', sa.Text,
+                                 comment='Textual error')]
+            columns = [column for column in columns
+                       if self.fields.get(column.name, True) is True]
+            table = sa.Table(name, metadata, *columns, schema=schema)
+            table.create(self.database.engine, checkfirst=True)
+            return table
+
+        def setup(self):
+            """Configure database logger."""
+            logger = pe.logger('devoe.task.logger', table=True,
+                               console=False, file=False, email=False)
+            if self.table is None:
+                logger.configure(table=False)
+            else:
+                if not self.database.engine.has_table(self.table):
+                    self.create_table()
+                date_column = 'updated'
+                logger.configure(db={'database': self.database,
+                                     'name': self.table,
+                                     'date_column': date_column})
+            return logger
+
+        pass
+
+    class Step():
+        """Represents a generator for the step logger."""
+
+        def __init__(self, logging, database=None,
+                     schema=None, table=None, **fields):
+            self.logging = logging if isinstance(logging, Logging) else None
+            self.database = database if isinstance(database, str) else None
+            if isinstance(database, Database) is True:
+                self.database = database
+            elif isinstance(database, str):
+                self.database = nodemaker.create(database)
+            else:
+                module = il.import_module('devoe.db')
+                self.database = module.db
+            self.schema = schema if isinstance(schema, str) else None
+            self.table = table if isinstance(table, str) else None
+            self.fields = {'records_read': True,
+                           'records_written': True,
+                           'records_updated': True,
+                           'records_merged': True,
+                           'files_read': True,
+                           'files_written': True,
+                           'bytes_read': True,
+                           'bytes_written': True,
+                           'errors_found': True,
+                           'initiator': False,
+                           'server': False,
+                           'user': False,
+                           'file_log': False,
+                           'text_log': False,
+                           'text_error': False}
+            self.change(**fields)
+            pass
+
+        def change(self, **fields):
+            """Modify table structure."""
+            for key, value in fields.items():
+                if key in self.fields.keys():
+                    if isinstance(value, bool):
+                        self.fields[key] = value
+            pass
+
+        def create_table(self):
+            """Create database table used for logging."""
+            name = self.table
+            schema = self.schema
+            metadata = self.logging.metadata
+            columns = [sa.Column('id', sa.Integer, sa.Sequence(f'{name}_seq'),
+                                 primary_key=True,
+                                 comment='Unique step ID'),
+                       sa.Column('task_id', sa.Integer,
+                                 comment='Task ID of this step'),
+                       sa.Column('job_id', sa.Integer,
+                                 comment='Job that performed this task'),
+                       sa.Column('run_id', sa.Integer,
+                                 comment='Run that performed this task'),
+                       sa.Column('run_date', sa.DateTime,
+                                 comment='Date for which task was performed'),
+                       sa.Column('step_name', sa.String(30),
+                                 comment='Name of the step'),
+                       sa.Column('step_type', sa.String(3),
+                                 comment='Type of the step'),
+                       sa.Column('updated', sa.DateTime,
+                                 comment='Date of this record change'),
+                       sa.Column('start_date', sa.DateTime,
+                                 comment='Date when task started'),
+                       sa.Column('end_date', sa.DateTime,
+                                 comment='Date when task ended'),
+                       sa.Column('status', sa.String(1),
+                                 comment='Current status.'),
+                       sa.Column('records_read', sa.Integer,
+                                 comment='Total number of read records'),
+                       sa.Column('records_written', sa.Integer,
+                                 comment='Total number of written records'),
+                       sa.Column('records_updated', sa.Integer,
+                                 comment='Total number of updated records'),
+                       sa.Column('records_merged', sa.Integer,
+                                 comment='Total number of merged records'),
+                       sa.Column('files_read', sa.Integer,
+                                 comment='Total number of read files'),
+                       sa.Column('files_written', sa.Integer,
+                                 comment='Total number of written files'),
+                       sa.Column('bytes_read', sa.Integer,
+                                 comment='Total volume of read bytes'),
+                       sa.Column('bytes_written', sa.Integer,
+                                 comment='Total volume of written bytes'),
+                       sa.Column('errors_found', sa.Integer,
+                                 comment='Total number of occurred errors'),
+                       sa.Column('initiator', sa.String(30),
+                                 comment='OS user who initiated the task'),
+                       sa.Column('server', sa.String(30),
+                                 comment='Host address with process'),
+                       sa.Column('user', sa.String(30),
+                                 comment='OS user who launched the process'),
+                       sa.Column('file_log', sa.String(30),
+                                 comment='Path to the log file'),
+                       sa.Column('text_log', sa.Text,
+                                 comment='Textual log records'),
+                       sa.Column('text_error', sa.Text,
+                                 comment='Textual error')]
+            columns = [column for column in columns
+                       if self.fields.get(column.name, True) is True]
+            table = sa.Table(name, metadata, *columns, schema=schema)
+            table.create(self.database.engine, checkfirst=True)
+            return table
+
+        def setup(self):
+            """Configure database logger."""
+            logger = pe.logger('devoe.step.logger', table=True,
+                               console=False, file=False, email=False)
+            if self.table is None:
+                logger.configure(table=False)
+            else:
+                if not self.database.engine.has_table(self.table):
+                    self.create_table()
+                date_column = 'updated'
+                logger.configure(db={'database': self.database,
+                                     'name': self.table,
+                                     'date_column': date_column})
+            return logger
+
+        pass
+
+    pass
 
 
 class Localhost():
     """Represents localhost i.e. no connection required."""
 
-    def __init__(self):
-        pass
+    pass
 
 
 class Server():
@@ -263,6 +405,8 @@ class Server():
         server = self
         creds = self.creds
         return Connection(server, creds)
+
+    pass
 
 
 class Connection():
@@ -297,6 +441,8 @@ class Connection():
                                   passwd=password)
         pass
 
+    pass
+
 
 class Database(pe.Database):
     """Represents database server and connection configuration to it."""
@@ -309,6 +455,8 @@ class Database(pe.Database):
                          sid=sid, service=service,
                          user=user, password=password)
         pass
+
+    pass
 
 
 class NodeMaker(dict):
@@ -391,6 +539,8 @@ class NodeMaker(dict):
         else:
             raise TypeError(f'name must be str, not {name.__class__.__name__}')
         pass
+
+    pass
 
 
 config = Configurator()
