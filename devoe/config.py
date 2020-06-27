@@ -74,7 +74,7 @@ class Configurator(dict):
                     value is None
                     or value.upper() == 'NONE'
                     or value.isspace() is True
-                   ):
+                ):
                     self[section][option] = None
                 elif value.upper() == 'TRUE':
                     self[section][option] = True
@@ -160,10 +160,12 @@ class Logging():
                            'file_log': False,
                            'text_log': False,
                            'text_error': False}
-            self.change(**fields)
+            self.optional = [key for key, value in self.fields.items()
+                             if value is False]
+            self.modify(**fields)
             pass
 
-        def change(self, **fields):
+        def modify(self, **fields):
             """Modify table structure."""
             for key, value in fields.items():
                 if key in self.fields.keys():
@@ -213,8 +215,8 @@ class Logging():
                                  comment='Total volume of written bytes'),
                        sa.Column('errors_found', sa.Integer,
                                  comment='Total number of occurred errors'),
-                       sa.Column('initiator', sa.String(30),
-                                 comment='OS user who initiated the task'),
+                       sa.Column('initiator', sa.String(1),
+                                 comment='Type of initiation in the task'),
                        sa.Column('server', sa.String(30),
                                  comment='Host address with process'),
                        sa.Column('user', sa.String(30),
@@ -279,10 +281,12 @@ class Logging():
                            'file_log': False,
                            'text_log': False,
                            'text_error': False}
-            self.change(**fields)
+            self.optional = [key for key, value in self.fields.items()
+                             if value is False]
+            self.modify(**fields)
             pass
 
-        def change(self, **fields):
+        def modify(self, **fields):
             """Modify table structure."""
             for key, value in fields.items():
                 if key in self.fields.keys():
@@ -310,6 +314,12 @@ class Logging():
                                  comment='Name of the step'),
                        sa.Column('step_type', sa.String(3),
                                  comment='Type of the step'),
+                       sa.Column('step_a', sa.String(30),
+                                 comment='Name of the step item A'),
+                       sa.Column('step_b', sa.String(30),
+                                 comment='Name of the step item b'),
+                       sa.Column('step_c', sa.String(30),
+                                 comment='Name of the step item c'),
                        sa.Column('updated', sa.DateTime,
                                  comment='Date of this record change'),
                        sa.Column('start_date', sa.DateTime,
@@ -336,8 +346,8 @@ class Logging():
                                  comment='Total volume of written bytes'),
                        sa.Column('errors_found', sa.Integer,
                                  comment='Total number of occurred errors'),
-                       sa.Column('initiator', sa.String(30),
-                                 comment='OS user who initiated the task'),
+                       sa.Column('initiator', sa.String(1),
+                                 comment='Type of initiation in the task'),
                        sa.Column('server', sa.String(30),
                                  comment='Host address with process'),
                        sa.Column('user', sa.String(30),
@@ -354,9 +364,9 @@ class Logging():
             table.create(self.database.engine, checkfirst=True)
             return table
 
-        def setup(self):
+        def setup(self, step):
             """Configure database logger."""
-            logger = pe.logger('devoe.step.logger', table=True,
+            logger = pe.logger(f'devoe.step.{step.seqno}.logger', table=True,
                                console=False, file=False, email=False)
             if self.table is None:
                 logger.configure(table=False)
@@ -482,10 +492,10 @@ class NodeMaker(dict):
                                 user=options.get('user'),
                                 password=options.get('password'))
             elif (
-                  options.get('ssh') is True
-                  or options.get('sftp') is True
-                  or options.get('ftp') is True
-                 ):
+                options.get('ssh') is True
+                or options.get('sftp') is True
+                or options.get('ftp') is True
+            ):
                 return Server(host=options.get('host'),
                               port=options.get('port'),
                               user=options.get('user'),

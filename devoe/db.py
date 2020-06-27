@@ -142,7 +142,7 @@ class Database(pe.Database):
                 if (
                     isinstance(value, self.Null) is True
                     or callable(norm_func) is False
-                   ):
+                ):
                     values[column] = value
                 elif callable(norm_func) is True:
                     values[column] = norm_func(value)
