@@ -161,3 +161,215 @@ class Mapper(Transformable, Base):
 
     pass
 
+
+class Table(Extractable, Loadable, Base):
+    """Represents database table as ETL Item."""
+
+    def __init__(self, item_name=None, database=None, schema=None,
+                 table_name=None, db_link=None, fetch_size=1000,
+                 purge=False, append=False):
+        super().__init__(name=(item_name or __class__.__name__))
+        self._database = None
+        self._schema = None
+        self._table_name = None
+        self._db_link = None
+        self._fetch_size = None
+        self._purge = None
+        self._append = None
+
+        self.database = database
+        self.schema = schema
+        self.table_name = table_name
+        self.db_link = db_link
+        self.fetch_size = fetch_size
+        self.purge = purge
+        self.append = append
+
+        pass
+
+    @property
+    def db(self):
+        """Describe database object (short)."""
+        return self._database
+
+    @property
+    def database(self):
+        """Describe database object."""
+        return self._database
+
+    @database.setter
+    def database(self, value):
+        if isinstance(value, Database):
+            self._database = value
+        elif isinstance(value, str):
+            self._database = nodemaker.create(value)
+        pass
+
+    @property
+    def schema(self):
+        """Describe schema name."""
+        return self._schema
+
+    @schema.setter
+    def schema(self, value):
+        if isinstance(value, str):
+            self._schema = value.lower()
+        pass
+
+    @property
+    def table_name(self):
+        """Describe schema name."""
+        return self._table_name
+
+    @table_name.setter
+    def table_name(self, value):
+        if isinstance(value, str):
+            self._table_name = value.lower()
+        pass
+
+    @property
+    def db_link(self):
+        """Describe DB link name."""
+        return self._db_link
+
+    @db_link.setter
+    def db_link(self, value):
+        if isinstance(value, str):
+            self._db_link = value.lower()
+        pass
+
+    @property
+    def fetch_size(self):
+        """Describe fetch size value."""
+        return self._fetch_size
+
+    @fetch_size.setter
+    def fetch_size(self, value):
+        if isinstance(value, int):
+            self._fetch_size = value
+        pass
+
+    @property
+    def purge(self):
+        """Describe flag defining whether data purge is needed or not."""
+        return self._purge
+
+    @purge.setter
+    def purge(self, value):
+        if isinstance(value, bool):
+            self._purge = value
+        pass
+
+    @property
+    def append(self):
+        """Describe flag defining whether append hint needed or not."""
+        return self._append
+
+    @append.setter
+    def append(self, value):
+        if isinstance(value, bool):
+            self._append = value
+        pass
+
+    @property
+    def exists(self):
+        """Check if table exists."""
+        if self.db is not None:
+            return self.db.engine.has_table(self.table_name)
+        pass
+
+    def configure(self, database=None, schema=None, table_name=None,
+                  db_link=None, fetch_size=None, append=None, purge=None):
+        """Configure the Item properties."""
+        self.database = database
+        self.schema = schema
+        self.table_name = table_name
+        self.db_link = db_link
+        self.fetch_size = fetch_size
+        self.purge = purge
+        self.append = append
+        pass
+
+    def get_table(self):
+        """Get object representing table."""
+        name = self.table_name
+        meta = sa.MetaData()
+        engine = self.db.engine
+        table = sa.Table(name, meta, schema=self.schema,
+                         autoload=True, autoload_with=engine)
+        return table
+
+    def get_address(self):
+        """Get full database table address (schema, table name, db link)."""
+        table = self.table_name
+        table = table if self.schema is None else f'{self.schema}.{table}'
+        table = table if self.db_link is None else f'{table}@{self.db_link}'
+        return table
+
+    def select(self):
+        """Select table data."""
+        conn = self.db.connect()
+        table = self.get_address()
+        query = sa.text(to_sql(f'select * from {table}'))
+        logger.info(f'Running SQL query <{self.table_name}>...')
+        logger.line(f'-------------------\n{query}\n-------------------')
+        answerset = conn.execute(query)
+        logger.info(f'SQL query <{self.table_name}> completed')
+        return answerset
+
+    def fetch(self):
+        """Fetch data from the table."""
+        answerset = self.select()
+        while True:
+            dataset = answerset.fetchmany(self.fetch_size)
+            if dataset:
+                yield [dict(record) for record in dataset]
+            else:
+                break
+        pass
+
+    def insert(self, chunk):
+        """Insert data in chunk to the table."""
+        conn = self.db.connect()
+        table = self.get_table()
+        query = table.insert()
+        return conn.execute(query, chunk)
+
+    def delete(self):
+        """Delete table data."""
+        conn = self.db.connect()
+        table = self.get_table()
+        query = table.delete()
+        answerset = conn.execute(query)
+        logger.info(f'{answerset.rowcount} {self.table_name} records deleted')
+        pass
+
+    def truncate(self):
+        """Truncate table data."""
+        conn = self.db.engine.connect()
+        table = self.get_address()
+        query = sa.text(f'truncate table {table}')
+        conn.execute(query)
+        logger.info(f'Table {self.table_name} truncated')
+        pass
+
+    def prepare(self):
+        """Prepare table."""
+        if self.purge is True:
+            logger.debug(f'Table {self.table_name} will be purged')
+            if self.db.vendor == 'oracle':
+                self.truncate()
+            else:
+                self.delete()
+        pass
+
+    def extract(self, step):
+        """Extract data."""
+        return self.fetch()
+
+    def load(self, step, dataset):
+        """Load data."""
+        return self.insert(dataset)
+
+    pass
+
