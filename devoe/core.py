@@ -51,7 +51,6 @@ class Scheduler():
         self.desc = desc
         self.owner = owner
 
-        sysinfo = pe.sysinfo()
         self.server = platform.node()
         self.user = os.getlogin()
         self.pid = os.getpid()
@@ -972,10 +971,14 @@ class Task():
         self.start_date = None
         self.end_date = None
         self._status = None
-        self.read = None
-        self.written = None
-        self.updated = None
-        self.merged = None
+        self._records_read = 0
+        self._records_written = 0
+        self._records_updated = 0
+        self._records_merged = 0
+        self._files_read = 0
+        self._files_written = 0
+        self._bytes_read = 0
+        self._bytes_written = 0
         self.errors = []
 
         self.initiator = 'S' if getattr(self.job, 'auto', 0) > 0 else 'U'
@@ -983,7 +986,6 @@ class Task():
         self.user = os.getlogin()
         self.file_log = logger.file.path if logger.file.status else None
 
-        atexit.register(self._exit)
         pass
 
     def __repr__(self):
@@ -1011,6 +1013,102 @@ class Task():
         else:
             message = (f'status must be str not {value.__class__.__name__}')
             raise TypeError(message)
+        pass
+
+    @property
+    def records_read(self):
+        """Get number of records read."""
+        return self._records_read
+
+    @records_read.setter
+    def records_read(self, value):
+        if isinstance(value, int):
+            self._records_read += value
+            self.logger.table(records_read=self.records_read)
+        pass
+
+    @property
+    def records_written(self):
+        """Get number of records written."""
+        return self._records_written
+
+    @records_written.setter
+    def records_written(self, value):
+        if isinstance(value, int):
+            self._records_written += value
+            self.logger.table(records_written=self.records_written)
+        pass
+
+    @property
+    def records_updated(self):
+        """Get number of records updated."""
+        return self._records_updated
+
+    @records_updated.setter
+    def records_updated(self, value):
+        if isinstance(value, int):
+            self._records_updated += value
+            self.logger.table(records_updated=self.records_updated)
+        pass
+
+    @property
+    def records_merged(self):
+        """Get number of records merged."""
+        return self._records_merged
+
+    @records_merged.setter
+    def records_merged(self, value):
+        if isinstance(value, int):
+            self._records_merged += value
+            self.logger.table(records_merged=self.records_merged)
+        pass
+
+    @property
+    def files_read(self):
+        """Get number of files read."""
+        return self._files_read
+
+    @files_read.setter
+    def files_read(self, value):
+        if isinstance(value, int):
+            self._files_read += value
+            self.logger.table(files_read=self.files_read)
+        pass
+
+    @property
+    def files_written(self):
+        """Get number of files written."""
+        return self._files_written
+
+    @files_written.setter
+    def files_written(self, value):
+        if isinstance(value, int):
+            self._files_written = value
+            self.logger.table(files_written=self.files_written)
+        pass
+
+    @property
+    def bytes_read(self):
+        """Get number of bytes read."""
+        return self._bytes_read
+
+    @bytes_read.setter
+    def bytes_read(self, value):
+        if isinstance(value, int):
+            self._bytes_read += value
+            self.logger.table(bytes_read=self.bytes_read)
+        pass
+
+    @property
+    def bytes_written(self):
+        """Get number of bytes written."""
+        return self._bytes_written
+
+    @bytes_written.setter
+    def bytes_written(self, value):
+        if isinstance(value, int):
+            self._bytes_written += value
+            self.logger.table(bytes_written=self.bytes_written)
         pass
 
     @property
@@ -1060,8 +1158,7 @@ class Task():
 
     def _start(self):
         logger.info(f'Starting {self}...')
-        logger.info(f'{self} is ETL operation task: '
-                    f'{[step.graph for step in self.steps.values()]}')
+        logger.info(f'{self}: {[step.graph for step in self.steps.values()]}')
         self.start_date = dt.datetime.now()
         self.status = 'S'
         self.id = self.logger.root.table.primary_key
@@ -1077,7 +1174,7 @@ class Task():
                              and self.logging.task.fields[key] is True})
         self.start()
         logger.debug(f'{self} started')
-        pass
+        return atexit.register(self._exit)
 
     def _execute(self):
         logger.info(f'Executing {self}...')
@@ -1136,8 +1233,8 @@ class Pipeline(Task):
         super().__init__(name=name, date=date, logging=logging, json=json)
         self.items = {}
         self.steps = {}
-        self.steps = self.append(*items)
         self.threads = []
+        self.add(*items)
         pass
 
     @property
@@ -1145,44 +1242,47 @@ class Pipeline(Task):
         """List all root steps."""
         return [step for step in self.walk() if not step.a.prev]
 
-    def append(self, *items):
-        """Add new items to this pipeline."""
-        logger.debug(f'Appending following items to {self}: {items}')
+    def add(self, *items, refresh=True):
+        """Add new pipeline items."""
+        logger.debug(f'Adding following items to {self}: {items}')
         root = list(self.items)[0] if self.items else None
         for i, item in enumerate(items):
-            logger.debug(f'Now {item} will be assigned to {self}...')
+            logger.debug(f'Now {item} will be added to {self}...')
             if not isinstance(item, (Item, list, tuple)):
                 message = (f'item must be Item, list or tupple'
                            f'not {item.__class__.__name__}')
                 raise TypeError(message)
             elif isinstance(item, (list, tuple)):
-                self.append(*item)
+                self.add(*item, refresh=False)
                 root = None
             else:
-                item.assign(self, root=root)
+                item.attach(self, root=root)
                 root = item
-        logger.debug(f'Items {items} appended to {self}')
-        return self.plan(*items)
+        logger.debug(f'Items {items} added to {self}')
+        return self.refresh() if refresh is True else None
 
-    def plan(self, *items):
-        """Generate pipeline steps using items linked to this pipeline."""
-        logger.debug(f'Generating steps for {self} from items: {items}')
+    def refresh(self):
+        """Refresh pipeline steps."""
+        logger.debug(f'Generating steps for {self}...')
+        items = [value for value in self.items.values()]
+        for key in [key for key in self.steps]:
+            self.steps.pop(key)
         for i, a in enumerate(items):
             if not isinstance(a, (list, tuple)) and a.extractable:
                 for b in a.next:
-                    if b.transformable and b in items:
+                    if b.transformable:
                         for c in b.next:
-                            if c.loadable and c in items:
+                            if c.loadable:
                                 step = Step(a=a, b=b, c=c)
-                                step.assign(self)
+                                step.attach(self)
                                 a.join(step)
-                    elif b.loadable and b in items:
+                    elif b.loadable:
                         step = Step(a=a, b=b)
-                        step.assign(self)
+                        step.attach(self)
                         a.join(step)
             elif not isinstance(a, (list, tuple)) and a.executable:
                 step = Step(a=a)
-                step.assign(self)
+                step.attach(self)
                 if i > 0:
                     items[i-1].join(step)
         logger.debug(f'Steps for {self} genererated')
@@ -1198,18 +1298,19 @@ class Pipeline(Task):
         """Run all pipeline steps."""
         for step in self.roots:
             logger.debug(f'Found {step} in roots of {self}')
-            self.thread(step)
+            self.to_thread(step)
         return self.wait()
 
-    def thread(self, step):
+    def to_thread(self, step):
         """Create new thread for step execution."""
         logger.debug(f'Creating thread for {step} in {self}...')
         name = f'StepThread-{step.seqno}'
         target = step.run
-        thread = th.Thread(name=name, target=target, daemon=True)
-        logger.debug(f'Created {thread.name} for {step} in {self}')
-        self.threads.append(thread)
-        return thread.start()
+        step.thread = th.Thread(name=name, target=target, daemon=True)
+        logger.debug(f'Created {step.thread.name} for {step} in {self}')
+        self.threads.append(step.thread)
+        logger.debug(f'Starting {step.thread.name}...')
+        return step.thread.start()
 
     def wait(self):
         """Wait until all threads are finished."""
@@ -1237,13 +1338,13 @@ class Element():
     @pipeline.setter
     def pipeline(self, value):
         """Set element pipeline."""
-        if isinstance(value, Pipeline):
+        if isinstance(value, Pipeline) or value is None:
             self._pipeline = value
         else:
             message = (f'pipeline must be Pipeline, '
                        f'not {value.__class__.__name__}')
             raise TypeError(message)
-        return
+        pass
 
     @property
     def name(self):
@@ -1285,7 +1386,7 @@ class Element():
         self.seqno = new_seqno
         pass
 
-    def assign(self, pipeline):
+    def attach(self, pipeline):
         """Assign element to the pipeline passed as argument."""
         self.pipeline = pipeline
         pass
@@ -1299,11 +1400,22 @@ class Item(Element):
     def __init__(self, name=None, seqno=None, pipeline=None):
         self.name = name or __class__.__name__
         self.seqno = seqno
-        if pipeline is not None:
-            self.assign(pipeline)
+        self.thread = None
+        self.pipeline = pipeline
         self._prev = []
         self._next = []
         self._steps = []
+        pass
+
+    @property
+    def item_name(self):
+        """Get item name."""
+        return self.name
+
+    @item_name.setter
+    def item_name(self, value):
+        """Set item name."""
+        self.rename(value)
         pass
 
     @property
@@ -1336,7 +1448,7 @@ class Item(Element):
         """List all steps where the item is a join."""
         return self._steps
 
-    def assign(self, pipeline, root=None):
+    def attach(self, pipeline, root=None):
         """Assign item to the pipeline passed as argument."""
         self.pipeline = pipeline
         self.prev = root
@@ -1354,7 +1466,7 @@ class Item(Element):
                 seqno += 1
                 name = f'{self.name} {seqno}'
         self.pipeline.items[name] = self
-        logger.debug(f'{self} assigned to {pipeline}')
+        logger.debug(f'{self} attached to {pipeline}')
         pass
 
     def join(self, step):
@@ -1365,6 +1477,10 @@ class Item(Element):
         else:
             message = (f'step must be Step, not {step.__class__.__name__}')
             raise TypeError(message)
+        pass
+
+    def prepare(self):
+        """Prepare Item."""
         pass
 
     pass
@@ -1378,6 +1494,12 @@ class Step(Element):
         self.id = None
         self.name = name or __class__.__name__
         self.seqno = seqno
+        self.thread = None
+        self.threads = []
+        self.queue = queue.Queue()
+        self.input = queue.Queue()
+        self.output = queue.Queue()
+
         assert a is None or isinstance(a, Item)
         self.a = a
         assert b is None or isinstance(b, Item)
@@ -1385,15 +1507,19 @@ class Step(Element):
         assert c is None or isinstance(c, Item)
         self.c = c
         if pipeline is not None:
-            self.assign(pipeline)
+            self.attach(pipeline)
 
         self.start_date = None
         self.end_date = None
         self._status = None
-        self.read = None
-        self.written = None
-        self.updated = None
-        self.merged = None
+        self._records_read = 0
+        self._records_written = 0
+        self._records_updated = 0
+        self._records_merged = 0
+        self._files_read = 0
+        self._files_written = 0
+        self._bytes_read = 0
+        self._bytes_written = 0
         self.errors = []
 
         self.initiator = None
@@ -1401,16 +1527,22 @@ class Step(Element):
         self.user = os.getlogin()
         self.file_log = logger.file.path if logger.file.status else None
 
-        self.queue = queue.Queue()
-        self.input = queue.Queue()
-        self.output = queue.Queue()
-
-        atexit.register(self._exit)
         pass
 
     def __repr__(self):
         """Represent step with its name."""
         return self.name
+
+    @property
+    def step_name(self):
+        """Get item name."""
+        return self.name
+
+    @step_name.setter
+    def step_name(self, value):
+        """Set item name."""
+        self.rename(value)
+        pass
 
     @property
     def type(self):
@@ -1427,7 +1559,7 @@ class Step(Element):
 
     @property
     def graph(self):
-        """Represent step structure."""
+        """Get string representing step structure."""
         if self.a is not None and self.b is None and self.c is None:
             return f'-->{self.a}-->'
         elif self.a is not None and self.b is not None and self.c is None:
@@ -1440,7 +1572,7 @@ class Step(Element):
 
     @property
     def first(self):
-        """Get last item in the step."""
+        """Get first item in the step."""
         return self.a
 
     @property
@@ -1472,6 +1604,139 @@ class Step(Element):
         pass
 
     @property
+    def records_read(self):
+        """Get number of records read."""
+        return self._records_read
+
+    @records_read.setter
+    def records_read(self, value):
+        if isinstance(value, int):
+            self._records_read += value
+            self.pipeline.records_read = value
+            self.logger.table(records_read=self.records_read)
+        pass
+
+    @property
+    def records_written(self):
+        """Get number of records written."""
+        return self._records_written
+
+    @records_written.setter
+    def records_written(self, value):
+        if isinstance(value, int):
+            self._records_written += value
+            self.pipeline.records_written = value
+            self.logger.table(records_written=self.records_written)
+        pass
+
+    @property
+    def records_updated(self):
+        """Get number of records updated."""
+        return self._records_updated
+
+    @records_updated.setter
+    def records_updated(self, value):
+        if isinstance(value, int):
+            self._records_updated += value
+            self.pipeline.records_updated = value
+            self.logger.table(records_updated=self.records_updated)
+        pass
+
+    @property
+    def records_merged(self):
+        """Get number of records merged."""
+        return self._records_merged
+
+    @records_merged.setter
+    def records_merged(self, value):
+        if isinstance(value, int):
+            self._records_merged += value
+            self.pipeline.records_merged = value
+            self.logger.table(records_merged=self.records_merged)
+        pass
+
+    @property
+    def files_read(self):
+        """Get number of files read."""
+        return self._files_read
+
+    @files_read.setter
+    def files_read(self, value):
+        if isinstance(value, int):
+            self._files_read += value
+            self.pipeline.files_read = value
+            self.logger.table(files_read=self.files_read)
+        pass
+
+    @property
+    def files_written(self):
+        """Get number of files written."""
+        return self._files_written
+
+    @files_written.setter
+    def files_written(self, value):
+        if isinstance(value, int):
+            self._files_written = value
+            self.pipeline.files_written = value
+            self.logger.table(files_written=self.files_written)
+        pass
+
+    @property
+    def bytes_read(self):
+        """Get number of bytes read."""
+        return self._bytes_read
+
+    @bytes_read.setter
+    def bytes_read(self, value):
+        if isinstance(value, int):
+            self._bytes_read += value
+            self.pipeline.bytes_read = value
+            self.logger.table(bytes_read=self.bytes_read)
+        pass
+
+    @property
+    def bytes_written(self):
+        """Get number of bytes written."""
+        return self._bytes_written
+
+    @bytes_written.setter
+    def bytes_written(self, value):
+        if isinstance(value, int):
+            self._bytes_written += value
+            self.pipeline.bytes_written = value
+            self.logger.table(bytes_written=self.bytes_written)
+        pass
+
+    @property
+    def extraction(self):
+        """Get extraction state."""
+        if self.type in ['ETL', 'EL'] and self.a.thread.is_alive() is True:
+            return True
+        else:
+            return False
+        pass
+
+    @property
+    def transformation(self):
+        """Get transformation state."""
+        if self.type == 'ETL' and self.b.thread.is_alive() is True:
+            return True
+        else:
+            return False
+        pass
+
+    @property
+    def loading(self):
+        """Get loading state."""
+        if self.type == 'ETL' and self.c.thread.is_alive() is True:
+            return True
+        if self.type == 'EL' and self.b.thread.is_alive() is True:
+            return True
+        else:
+            return False
+        pass
+
+    @property
     def text_error(self):
         """Get textual exception from the last registered error."""
         if self.errors:
@@ -1480,8 +1745,8 @@ class Step(Element):
             return None
         pass
 
-    def assign(self, pipeline):
-        """Assign step to the pipeline passed as argument."""
+    def attach(self, pipeline):
+        """Attach step to the pipeline passed as argument."""
         self.pipeline = pipeline
         name = Step.__name__
         seqno = 1
@@ -1505,7 +1770,7 @@ class Step(Element):
         self.logging = self.pipeline.logging
         self.logger = self.pipeline.logging.step.setup(self)
         logger.debug(f'{self.logger.name} is used for {self} logging')
-        logger.debug(f'{self}: {self.graph} - assigned to {pipeline}')
+        logger.debug(f'{self}: {self.graph} - attached to {pipeline}')
         pass
 
     def run(self):
@@ -1519,12 +1784,12 @@ class Step(Element):
         """Proceed execution by running all joined steps."""
         if self.status == 'D':
             for step in self.last.joins:
-                self.pipeline.thread(step)
+                self.pipeline.to_thread(step)
         pass
 
     def _start(self):
         logger.info(f'Starting {self}...')
-        logger.info(f'{self} is {self.type} operation step: {self.graph}')
+        logger.info(f'{self} is {self.type} operation: {self.graph}')
         self.start_date = dt.datetime.now()
         self.status = 'S'
         self.id = self.logger.root.table.primary_key
@@ -1542,27 +1807,33 @@ class Step(Element):
                              if key in self.logging.step.optional
                              and self.logging.step.fields[key] is True})
         if self.a is not None:
-            self.logger.table(step_a=self.a.name)
+            self.logger.table(step_a=self.a.item_name)
             if self.b is not None:
-                self.logger.table(step_b=self.b.name)
+                self.logger.table(step_b=self.b.item_name)
                 if self.c is not None:
-                    self.logger.table(step_c=self.c.name)
+                    self.logger.table(step_c=self.c.item_name)
         logger.debug(f'{self} started')
-        pass
+        return atexit.register(self._exit)
 
     def _execute(self):
         logger.info(f'Executing {self}...')
         try:
             self.status = 'R'
             if self.type == 'ETL':
-                self.a.extract()
-                self.b.transform()
-                self.c.load()
+                self.c.prepare()
+                self.a.to_extractor(self, self.input)
+                self.b.to_transformer(self, self.input, self.output)
+                self.c.to_loader(self, self.output)
             elif self.type == 'EL':
-                self.a.extract()
-                self.b.load()
+                self.b.prepare()
+                self.a.to_extractor(self, self.queue)
+                self.b.to_loader(self, self.queue)
             elif self.type == 'X':
-                self.execute()
+                self.to_executor(self)
+            for thread in self.threads:
+                logger.debug(f'Waiting for {thread.name} to finish...')
+                thread.join()
+                logger.debug(f'{thread.name} finished')
         except Exception:
             self._error()
         else:

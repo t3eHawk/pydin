@@ -14,7 +14,8 @@ long_description_content_type = 'text/markdown'
 license = devoe.__license__
 url = 'https://github.com/t3eHawk/devoe'
 install_requires = ['pepperoni', 'sqlalchemy', 'cx_Oracle', 'paramiko',
-                    'flask', 'flask_httpauth', 'waitress', 'gitpython']
+                    'flask', 'flask_httpauth', 'waitress',
+                    'sqlparse', 'gitpython']
 packages = setuptools.find_packages()
 classifiers = ['Programming Language :: Python :: 3',
                'License :: OSI Approved :: MIT License',

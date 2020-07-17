@@ -4,6 +4,7 @@ import datetime as dt
 import importlib as imp
 import os
 import re
+import sqlparse
 import subprocess as sp
 import sys
 
@@ -134,3 +135,9 @@ def to_python(file, args=None):
     python = sys.executable
     proc = to_process(python, file, args, devnull=True, spawn=True)
     return proc
+
+
+def to_sql(text):
+    """Format given SQL text."""
+    return sqlparse.format(text, keyword_case='upper', identifier_case='lower',
+                           strip_comments=True, reindent_aligned=True)
