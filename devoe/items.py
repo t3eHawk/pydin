@@ -147,3 +147,17 @@ class Executable():
 
     pass
 
+
+class Mapper(Transformable, Base):
+    """Represents basic mapper used for data transformation."""
+
+    def __init__(self, item_name=None):
+        super().__init__(name=(item_name or __class__.__name__))
+        pass
+
+    def transform(self, input):
+        """Transform data."""
+        return input
+
+    pass
+
