@@ -558,3 +558,209 @@ class Select(Extractable, Base):
 
     pass
 
+
+class CSV(Extractable, Loadable, Base):
+    """Represents CSV file as ETL Item."""
+
+    def __init__(self, item_name=None, path=None, file_name=None,
+                 head=True, columns=None, delimiter=';', terminator='\r\n',
+                 enclosure=None, trim=False, encoding='utf-8', fetch_size=1000,
+                 purge=False):
+
+        super().__init__(name=(item_name or __class__.__name__))
+        self.path = path
+        self.file_name = file_name
+        self.head = head
+        self.columns = columns
+        self.delimiter = delimiter
+        self.terminator = terminator
+        self.enclosure = enclosure
+        self.trim = trim
+        self.encoding = encoding
+        self.fetch_size = fetch_size
+        self.purge = purge
+        pass
+
+    @property
+    def file_name(self):
+        """Get formatted file name."""
+        return self._file_name
+
+    @file_name.setter
+    def file_name(self, value):
+        if isinstance(value, str) or value is None:
+            self._file_name = tm.strftime(value) if value is not None else None
+            if self.file_name is not None:
+                self.path = os.path.join(self._path, self._file_name)
+        pass
+
+    @property
+    def path(self):
+        """Get full file path."""
+        return self._path
+
+    @path.setter
+    def path(self, value):
+        if isinstance(value, str) or value is None:
+            self._path = os.path.abspath(value) if value is not None else None
+        pass
+
+    @property
+    def head(self):
+        """Get header flag."""
+        return self._head
+
+    @head.setter
+    def head(self, value):
+        if isinstance(value, bool) or value is None:
+            self._head = value
+        pass
+
+    @property
+    def columns(self):
+        """Get list with configured column names."""
+        return self._columns
+
+    @columns.setter
+    def columns(self, value):
+        if isinstance(value, list) or value is None:
+            if value and all([el for el in value if isinstance(el, str)]):
+                self._columns = value
+            else:
+                self._columns = None
+        pass
+
+    @property
+    def delimiter(self):
+        """Get column delimiter."""
+        return self._delimiter
+
+    @delimiter.setter
+    def delimiter(self, value):
+        if isinstance(value, str) or value is None:
+            self._delimiter = value
+        pass
+
+    @property
+    def terminator(self):
+        """Get line terminator."""
+        return self._terminator
+
+    @terminator.setter
+    def terminator(self, value):
+        if isinstance(value, str) or value is None:
+            self._terminator = value
+        pass
+
+    @property
+    def enclosure(self):
+        """Get column enclosure."""
+        return self._enclosure
+
+    @enclosure.setter
+    def enclosure(self, value):
+        if isinstance(value, str) or value is None:
+            self._enclosure = value
+        pass
+
+    @property
+    def trim(self):
+        """Get trim flag."""
+        return self._trim
+
+    @trim.setter
+    def trim(self, value):
+        if isinstance(value, bool) or value is None:
+            self._trim = value
+        pass
+
+    @property
+    def encoding(self):
+        """Get CSV file target encoding."""
+        return self._encoding
+
+    @encoding.setter
+    def encoding(self, value):
+        if isinstance(value, str) or value is None:
+            self._encoding = value
+        pass
+
+    @property
+    def fetch_size(self):
+        """Get fetch size value."""
+        return self._fetch_size
+
+    @fetch_size.setter
+    def fetch_size(self, value):
+        if isinstance(value, int) or value is None:
+            self._fetch_size = value
+        pass
+
+    @property
+    def purge(self):
+        """Get purge flag."""
+        return self._purge
+
+    @purge.setter
+    def purge(self, value):
+        if isinstance(value, bool) or value is None:
+            self._purge = value
+        pass
+
+    @property
+    def dialect(self):
+        """Generate CSV dialect based on configuration."""
+        delimiter = self.delimiter
+        quotechar = self.enclosure
+        quoting = csv.QUOTE_NONE if quotechar is None else csv.QUOTE_ALL
+        lineterminator = self.terminator
+        skipinitialspace = self.trim
+        dialect = {'delimiter': delimiter,
+                   'quotechar': quotechar,
+                   'quoting': quoting,
+                   'lineterminator': lineterminator,
+                   'skipinitialspace': skipinitialspace}
+        return dialect
+
+    def delete(self):
+        """Delete all data in the file."""
+        open(self.path, 'w+').close()
+        logger.info(f'All {self.path} records deleted')
+        pass
+
+    def prepare(self):
+        """Prepare CSV file for ETL operation."""
+        if self.purge is True:
+            logger.debug(f'CSV file {self.path} will be purged')
+            self.delete()
+        pass
+
+    def extract(self, step):
+        """Extract data from CSV file."""
+        with open(self.path, 'r', encoding=self.encoding) as fh:
+            dialect = self.dialect
+            fieldnames = self.columns
+            reader = csv.DictReader(fh, fieldnames, **dialect)
+            rows = [row for row in reader]
+            length = len(rows)
+            start = 0
+            end = start+self.fetch_size
+            while start < length:
+                yield rows[start:end]
+                start += self.fetch_size
+                end = start+self.fetch_size
+        pass
+
+    def load(self, step, dataset):
+        """Load data to CSV file."""
+        with open(self.path, 'a+', encoding=self.encoding, newline='') as fh:
+            dialect = self.dialect
+            fieldnames = [el for el in dataset[0]]
+            writer = csv.DictWriter(fh, fieldnames, **dialect)
+            if self.head is True and os.path.getsize(self.path) == 0:
+                writer.writeheader()
+            writer.writerows(dataset)
+        pass
+
+    pass
+
