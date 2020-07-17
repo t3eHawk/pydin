@@ -373,3 +373,188 @@ class Table(Extractable, Loadable, Base):
 
     pass
 
+
+class Select(Extractable, Base):
+    """Represents SQL select as ETL Item."""
+
+    def __init__(self, item_name=None, database=None, text=None, file=None,
+                 columns=None, alias=None, parallel=False, fetch_size=1000):
+        super().__init__(name=(item_name or __class__.__name__))
+        self._database = None
+        self._parallel = None
+        self._text = None
+        self._file = None
+        self._columns = None
+        self._alias = None
+        self._fetch_size = None
+
+        self.database = database
+        self.parallel = parallel
+        self.text = text
+        self.file = file
+        self.columns = columns
+        self.alias = alias
+        self.fetch_size = fetch_size
+
+        pass
+
+    @property
+    def db(self):
+        """Get database object (short)."""
+        return self._database
+
+    @property
+    def database(self):
+        """Get database object."""
+        return self._database
+
+    @database.setter
+    def database(self, value):
+        if isinstance(value, Database):
+            self._database = value
+        elif isinstance(value, str):
+            self._database = nodemaker.create(value)
+        pass
+
+    @property
+    def text(self):
+        """Get raw SQL text."""
+        return self._text
+
+    @text.setter
+    def text(self, value):
+        if isinstance(value, str):
+            self._text = to_sql(value)
+        pass
+
+    @property
+    def file(self):
+        """Get path to file containing select SQL text."""
+        return self._file
+
+    @file.setter
+    def file(self, value):
+        if isinstance(value, str):
+            self._file = os.path.abspath(value)
+            if os.path.exists(self._file):
+                self.text = open(self.file, 'r').read()
+        pass
+
+    @property
+    def columns(self):
+        """Get list with configured column names."""
+        return self._columns
+
+    @columns.setter
+    def columns(self, value):
+        if isinstance(value, list):
+            if all([el for el in value if isinstance(el, str)]):
+                self._columns = value
+        pass
+
+    @property
+    def parallel(self):
+        """Get parallel flag."""
+        return self._parallel
+
+    @parallel.setter
+    def parallel(self, value):
+        if isinstance(value, (int, bool)):
+            self._parallel = value
+        pass
+
+    @property
+    def query(self):
+        """Get foramtted SQL text object that can be executed in database."""
+        query = self.parse()
+        return query
+
+    @property
+    def query_with_columns(self):
+        """Get SQL text object with described columns."""
+        columns = [sa.column(column) for column in self.describe()]
+        query = self.query.columns(*columns)
+        return query
+
+    @property
+    def query_with_alias(self):
+        """Get SQL object with described columns and alias."""
+        alias = self.alias or 's'
+        query = self.query_with_columns.alias(name=alias)
+        return query
+
+    @property
+    def fetch_size(self):
+        """Get fetch size value."""
+        return self._fetch_size
+
+    @fetch_size.setter
+    def fetch_size(self, value):
+        if isinstance(value, int):
+            self._fetch_size = value
+        pass
+
+    def parse(self):
+        """Parse into SQL text object."""
+        text = self.text
+        text = self._format_text(text)
+        text = self._hintinize_text(text)
+        query = sa.text(text)
+        return query
+
+    def describe(self):
+        """Get a real column list from the answerset."""
+        conn = self.db.connect()
+        query = to_sql(f'select * from ({self.query}) where 1 = 0')
+        answerset = conn.execute(query)
+        columns = answerset.keys()
+        return columns
+
+    def execute(self):
+        """Execute SQL query in database."""
+        conn = self.db.connect()
+        query = self.parse()
+        logger.info(f'Running SQL query...')
+        logger.line(f'-------------------\n{query}\n-------------------')
+        answerset = conn.execute(query)
+        logger.info(f'SQL query completed')
+        return answerset
+
+    def fetch(self):
+        """Fetch data from the query answerset."""
+        answerset = self.execute()
+        while True:
+            dataset = answerset.fetchmany(self.fetch_size)
+            if dataset:
+                yield [dict(record) for record in dataset]
+            else:
+                break
+        pass
+
+    def extract(self, step):
+        """Extract data."""
+        return self.fetch()
+
+    def _format_text(self, text):
+        text = text.format(p=self.pipeline)
+        return text
+
+    def _hintinize_text(self, text):
+        if self.db.vendor == 'oracle':
+            statements = spe.parse(text)
+            tvalue = 'SELECT'
+            ttype = spe.tokens.Keyword.DML
+            parallel = self.parallel
+            if parallel > 0:
+                degree = '' if parallel is True else f'({parallel})'
+                hint = f'/*+ parallel{degree} */'
+                for i, token in enumerate(statements[0].tokens):
+                    if token.match(ttype, tvalue):
+                        tvalue = f'{tvalue} {hint}'
+                        new_token = spe.sql.Token(ttype, tvalue)
+                        statements[0].tokens[i] = new_token
+            text = str(statements[0])
+        return text
+
+    pass
+
