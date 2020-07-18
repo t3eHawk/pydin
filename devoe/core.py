@@ -1415,7 +1415,7 @@ class Item(Element):
     @item_name.setter
     def item_name(self, value):
         """Set item name."""
-        self.rename(value)
+        self.name = value
         pass
 
     @property

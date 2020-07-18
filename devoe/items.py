@@ -1,7 +1,10 @@
 """Contains Item prototypes and built-in Items."""
 
 import csv
+import datetime as dt
+import json
 import os
+import stat
 import threading as th
 import time as tm
 
@@ -557,26 +560,29 @@ class Select(Extractable, Base):
     pass
 
 
-class CSV(Extractable, Loadable, Base):
-    """Represents CSV file as ETL Item."""
+
+class File(Extractable, Loadable, Base):
+    """Represents JSON file as ETL item."""
 
     def __init__(self, item_name=None, path=None, file_name=None,
-                 head=True, columns=None, delimiter=';', terminator='\r\n',
-                 enclosure=None, trim=False, encoding='utf-8', fetch_size=1000,
-                 purge=False):
-
+                 encoding='utf-8', fetch_size=1000, purge=False):
         super().__init__(name=(item_name or __class__.__name__))
         self.path = path
         self.file_name = file_name
-        self.head = head
-        self.columns = columns
-        self.delimiter = delimiter
-        self.terminator = terminator
-        self.enclosure = enclosure
-        self.trim = trim
         self.encoding = encoding
         self.fetch_size = fetch_size
         self.purge = purge
+        pass
+
+    @property
+    def path(self):
+        """Get full file path."""
+        return self._path
+
+    @path.setter
+    def path(self, value):
+        if isinstance(value, str) or value is None:
+            self._path = os.path.abspath(value) if value is not None else None
         pass
 
     @property
@@ -593,14 +599,79 @@ class CSV(Extractable, Loadable, Base):
         pass
 
     @property
-    def path(self):
-        """Get full file path."""
-        return self._path
+    def encoding(self):
+        """Get CSV file target encoding."""
+        return self._encoding
 
-    @path.setter
-    def path(self, value):
+    @encoding.setter
+    def encoding(self, value):
         if isinstance(value, str) or value is None:
-            self._path = os.path.abspath(value) if value is not None else None
+            self._encoding = value
+        pass
+
+    @property
+    def empty(self):
+        """Check whether file is empty or not."""
+        if os.path.getsize(self.path) == 0:
+            return True
+        else:
+            return False
+        pass
+
+    @property
+    def fetch_size(self):
+        """Get fetch size value."""
+        return self._fetch_size
+
+    @fetch_size.setter
+    def fetch_size(self, value):
+        if isinstance(value, int) or value is None:
+            self._fetch_size = value
+        pass
+
+    @property
+    def purge(self):
+        """Get purge flag."""
+        return self._purge
+
+    @purge.setter
+    def purge(self, value):
+        if isinstance(value, bool) or value is None:
+            self._purge = value
+        pass
+
+    def delete(self):
+        """Delete all data in the file."""
+        open(self.path, 'w+').close()
+        logger.info(f'All {self.path} records deleted')
+        pass
+
+    def prepare(self):
+        """Prepare CSV file for ETL operation."""
+        if self.purge is True:
+            logger.debug(f'CSV file {self.path} will be purged')
+            self.delete()
+        pass
+
+    pass
+
+
+class CSV(File):
+    """Represents CSV file as ETL Item."""
+
+    def __init__(self, item_name=None, path=None, file_name=None,
+                 head=True, columns=None, delimiter=';', terminator='\r\n',
+                 enclosure=None, trim=False, encoding='utf-8', fetch_size=1000,
+                 purge=False):
+        super().__init__(item_name=(item_name or __class__.__name__),
+                         path=path, file_name=file_name, encoding=encoding,
+                         fetch_size=fetch_size, purge=purge)
+        self.head = head
+        self.columns = columns
+        self.delimiter = delimiter
+        self.terminator = terminator
+        self.enclosure = enclosure
+        self.trim = trim
         pass
 
     @property
@@ -673,39 +744,6 @@ class CSV(Extractable, Loadable, Base):
         pass
 
     @property
-    def encoding(self):
-        """Get CSV file target encoding."""
-        return self._encoding
-
-    @encoding.setter
-    def encoding(self, value):
-        if isinstance(value, str) or value is None:
-            self._encoding = value
-        pass
-
-    @property
-    def fetch_size(self):
-        """Get fetch size value."""
-        return self._fetch_size
-
-    @fetch_size.setter
-    def fetch_size(self, value):
-        if isinstance(value, int) or value is None:
-            self._fetch_size = value
-        pass
-
-    @property
-    def purge(self):
-        """Get purge flag."""
-        return self._purge
-
-    @purge.setter
-    def purge(self, value):
-        if isinstance(value, bool) or value is None:
-            self._purge = value
-        pass
-
-    @property
     def dialect(self):
         """Generate CSV dialect based on configuration."""
         delimiter = self.delimiter
@@ -719,19 +757,6 @@ class CSV(Extractable, Loadable, Base):
                    'lineterminator': lineterminator,
                    'skipinitialspace': skipinitialspace}
         return dialect
-
-    def delete(self):
-        """Delete all data in the file."""
-        open(self.path, 'w+').close()
-        logger.info(f'All {self.path} records deleted')
-        pass
-
-    def prepare(self):
-        """Prepare CSV file for ETL operation."""
-        if self.purge is True:
-            logger.debug(f'CSV file {self.path} will be purged')
-            self.delete()
-        pass
 
     def extract(self, step):
         """Extract data from CSV file."""
@@ -751,11 +776,11 @@ class CSV(Extractable, Loadable, Base):
 
     def load(self, step, dataset):
         """Load data to CSV file."""
-        with open(self.path, 'a+', encoding=self.encoding, newline='') as fh:
+        with open(self.path, 'a', encoding=self.encoding, newline='') as fh:
             dialect = self.dialect
             fieldnames = [el for el in dataset[0]]
             writer = csv.DictWriter(fh, fieldnames, **dialect)
-            if self.head is True and os.path.getsize(self.path) == 0:
+            if self.head is True and self.empty:
                 writer.writeheader()
             writer.writerows(dataset)
         pass
