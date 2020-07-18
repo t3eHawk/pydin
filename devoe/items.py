@@ -7,6 +7,8 @@ import os
 import stat
 import threading as th
 import time as tm
+import xml.etree.ElementTree as xet
+import xml.dom.minidom as xdom
 
 import sqlalchemy as sa
 import sqlparse as spe
@@ -825,6 +827,57 @@ class JSON(File):
         content = self.parse()
         with open(self.path, 'w', encoding=self.encoding) as fh:
             json.dump(content+dataset, fh, indent=2)
+        pass
+
+    pass
+
+
+class XML(File):
+    """Represents XML file as ETL item."""
+
+    def __init__(self, item_name=None, path=None, file_name=None,
+                 encoding='utf-8', fetch_size=1000, purge=False):
+        super().__init__(item_name=(item_name or __class__.__name__),
+                         path=path, file_name=file_name, encoding=encoding,
+                         fetch_size=fetch_size, purge=purge)
+
+    def parse(self):
+        """Parse XML file and/or get XML tree root."""
+        if not self.empty:
+            return xet.parse(self.path).getroot()
+        else:
+            return xet.Element('data')
+        pass
+
+    def extract(self, step):
+        """Extract data from XML file."""
+        root = self.parse()
+        length = len(root)
+        start = 0
+        end = start+self.fetch_size
+        while start < length:
+            dataset = []
+            for record in root[start:end]:
+                dataset.append({field.tag: field.text for field in record})
+            yield dataset
+            start += self.fetch_size
+            end = start+self.fetch_size
+        pass
+
+    def load(self, step, dataset):
+        """Load data to XML file."""
+        root = self.parse()
+        for record in dataset:
+            element = xet.SubElement(root, 'record')
+            for key, value in record.items():
+                field = xet.SubElement(element, key)
+                field.text = str(value)
+        with open(self.path, 'w', encoding=self.encoding) as fh:
+            string = xet.tostring(root).decode(self.encoding)
+            string = string.replace('  ', '')
+            string = string.replace('\n', '')
+            dom = xdom.parseString(string)
+            dom.writexml(fh, addindent='  ', newl='\n')
         pass
 
     pass
