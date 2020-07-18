@@ -1,9 +1,12 @@
 """Contains main application configurator and other configuration elements."""
 
+import calendar as cnd
+import datetime as dt
 import importlib as il
 import ftplib
 import configparser
 import os
+import platform
 import sys
 
 import paramiko as po
@@ -16,11 +19,11 @@ filename = 'devoe.ini'
 user_config = os.path.abspath(os.path.expanduser(f'~/.devoe/{filename}'))
 home_config = os.path.join(home, filename) if home is not None else None
 local_config = os.path.join(os.path.dirname(sys.argv[0]), filename)
-nodes_config = os.path.abspath(os.path.expanduser(f'~/.devoe/nodes.ini'))
+nodes_config = os.path.abspath(os.path.expanduser(f'~/.devoe/index.ini'))
 
 
 class Configurator(dict):
-    """Represents application configurator."""
+    """Represents main application configurator."""
 
     def __init__(self):
         super().__init__()
@@ -98,7 +101,7 @@ class Configurator(dict):
 
 
 class Logging():
-    """Represents a special configurator for the tasks and steps loggers."""
+    """Represents logging configurator used for special loggers."""
 
     def __init__(self, task=True, step=False, database=None,
                  schema=None, table=None,  **fields):
@@ -139,7 +142,7 @@ class Logging():
             if isinstance(database, Database) is True:
                 self.database = database
             elif isinstance(database, str):
-                self.database = nodemaker.create(database)
+                self.database = connector.create(database)
             else:
                 module = il.import_module('devoe.db')
                 self.database = module.db
@@ -258,7 +261,7 @@ class Logging():
             if isinstance(database, Database) is True:
                 self.database = database
             elif isinstance(database, str):
-                self.database = nodemaker.create(database)
+                self.database = connector.create(database)
             else:
                 module = il.import_module('devoe.db')
                 self.database = module.db
@@ -383,6 +386,10 @@ class Logging():
 class Localhost():
     """Represents localhost i.e. no connection required."""
 
+    def __init__(self):
+        self.host = platform.node()
+        pass
+
     pass
 
 
@@ -406,46 +413,61 @@ class Server():
         self.ftp = ftp if isinstance(ftp, bool) else False
         pass
 
+    class Connection():
+        """Represents ordinary remote server connection."""
+
+        def __init__(self, server, creds):
+            server = server if isinstance(server, Server) else None
+            user = creds.get('user')
+            password = creds.get('password')
+            keyfile = creds.get('keyfile')
+            if server.ssh is True and server is not None:
+                self.ssh = po.SSHClient()
+                self.ssh.set_missing_host_key_policy(po.AutoAddPolicy())
+                self.ssh.connect(server.host, port=server.port,
+                                 username=user, password=password,
+                                 key_filename=keyfile)
+            if server.sftp is True and server is not None:
+                if server.ssh is True:
+                    self.sftp = self.ssh.open_sftp()
+                else:
+                    transport = po.Transport((server.host, server.port))
+                    if keyfile is not None:
+                        key = po.RSAKey(filename=keyfile)
+                        transport.connect(username=user, pkey=key)
+                    else:
+                        transport.connect(username=user,
+                                          password=password)
+                    self.sftp = po.SFTPClient.from_transport(transport)
+            if server.ftp is True and server is not None:
+                self.ftp = ftplib.FTP(host=server.host,
+                                      user=user,
+                                      passwd=password)
+            pass
+
+        pass
+
     def connect(self):
         """Connect to remote server."""
         server = self
         creds = self.creds
-        return Connection(server, creds)
+        return self.Connection(server, creds)
 
-    pass
-
-
-class Connection():
-    """Represents ordinary remote server connection."""
-
-    def __init__(self, server, creds):
-        server = server if isinstance(server, Server) else None
-        user = creds.get('user')
-        password = creds.get('password')
-        keyfile = creds.get('keyfile')
-        if server.ssh is True and server is not None:
-            self.ssh = po.SSHClient()
-            self.ssh.set_missing_host_key_policy(po.AutoAddPolicy())
-            self.ssh.connect(server.host, port=server.port,
-                             username=user, password=password,
-                             key_filename=keyfile)
-        if server.sftp is True and server is not None:
-            if server.ssh is True:
-                self.sftp = self.ssh.open_sftp()
-            else:
-                transport = po.Transport((server.host, server.port))
-                if keyfile is not None:
-                    key = po.RSAKey(filename=keyfile)
-                    transport.connect(username=user, pkey=key)
-                else:
-                    transport.connect(username=user,
-                                      password=password)
-                self.sftp = po.SFTPClient.from_transport(transport)
-        if server.ftp is True and server is not None:
-            self.ftp = ftplib.FTP(host=server.host,
-                                  user=user,
-                                  passwd=password)
-        pass
+    def exists(self, path):
+        """Check if file with given path exists in file system."""
+        conn = self.connect()
+        if self.sftp is True:
+            try:
+                conn.sftp.chdir(path)
+                return True
+            except IOError:
+                return False
+        elif self.ftp is True:
+            try:
+                conn.ftp.cwd(path)
+                return True
+            except Exception:
+                return False
 
     pass
 
@@ -465,8 +487,8 @@ class Database(pe.Database):
     pass
 
 
-class NodeMaker(dict):
-    """Represents special configurator used for node connections."""
+class Connector(dict):
+    """Represents connections configurator."""
 
     def __init__(self):
         super().__init__()
@@ -549,14 +571,285 @@ class NodeMaker(dict):
     pass
 
 
+class Calendar():
+    """Represents calendar configurator."""
+
+    class Date():
+        """Represents a single date."""
+
+        def __init__(self, now=None):
+            self.now = now
+            self.timezone = None
+            pass
+
+        def __repr__(self):
+            """Represent object as a datetime string."""
+            return str(self.now)
+
+        class value():
+            """Represents wrapper used to calculate final date value."""
+
+            def __init__(self, func):
+                self.func = func
+                self.__doc__ = func.__doc__
+                pass
+
+            def __call__(self, obj):
+                """Get final date value."""
+                datetime = self.func(obj)
+                if obj.timezone is not None:
+                    return datetime.astimezone(tz=obj.timezone)
+                else:
+                    return datetime
+                pass
+
+            pass
+
+        @property
+        @value
+        def now(self):
+            """Get current date."""
+            return self._now
+
+        @now.setter
+        def now(self, value):
+            if isinstance(value, dt.datetime) or value is None:
+                self._now = value
+            pass
+
+        @property
+        @value
+        def start(self):
+            """Get start of current date."""
+            return self._start
+
+        @property
+        @value
+        def end(self):
+            """Get end of current date."""
+            return self._end
+
+        @property
+        def prev(self):
+            """Get previous day."""
+            now = self.now-dt.timedelta(days=1)
+            return Calendar.Date(now)
+
+        @property
+        def next(self):
+            """Get next day."""
+            now = self.now+dt.timedelta(days=1)
+            return Calendar.Date(now)
+
+        @property
+        def hour(self):
+            """Get current hour."""
+            return Calendar.Hour(self.now)
+
+        @property
+        def yesterday(self):
+            """Get yesterday."""
+            return Calendar.Yesterday(self.now)
+
+        @property
+        def tomorrow(self):
+            """Get tomorrow."""
+            return Calendar.Tomorrow(self.now)
+
+        @property
+        def month(self):
+            """Get current month."""
+            return Calendar.Month(self.now)
+
+        @property
+        def year(self):
+            """Get current year."""
+            return Calendar.Year(self.now)
+
+        @property
+        def local(self):
+            """Set local timezone."""
+            self.timezone = None
+            return self
+
+        @property
+        def utc(self):
+            """Set UTC timezone."""
+            self.timezone = dt.timezone.utc
+            return self
+
+        @property
+        def yd(self):
+            """Shortcut for yesterday."""
+            return self.yesterday
+
+        @property
+        def tm(self):
+            """Shortcut for tomorrow."""
+            return self.tomorrow
+
+        @property
+        def hh(self):
+            """Shortcut for hour."""
+            return self.hour
+
+        @property
+        def mm(self):
+            """Shortcut for month."""
+            return self.month
+
+        @property
+        def yyyy(self):
+            """Shortcut for year."""
+            return self.year
+
+        @property
+        def pv(self):
+            """Shrotcut for prev."""
+            return self.prev
+
+        @property
+        def nt(self):
+            """Shrotcut for next."""
+            return self.next
+
+        pass
+
+    class Day(Date):
+        """Represents certain day."""
+
+        def __init__(self, now):
+            super().__init__(now)
+            pass
+
+        @property
+        def _start(self):
+            """Get start of current date."""
+            return self._now.replace(hour=0, minute=0, second=0)
+
+        @property
+        def _end(self):
+            """Get end of current date."""
+            return self._now.replace(hour=23, minute=59, second=59)
+
+    pass
+
+    class Today(Day):
+        """Represents current day."""
+
+        def __init__(self):
+            super().__init__(dt.datetime.now())
+            pass
+
+        pass
+
+    class Yesterday(Day):
+        """Represents yesterday."""
+
+        def __init__(self, now=None):
+            super().__init__((now or dt.datetime.now())-dt.timedelta(days=1))
+            pass
+
+        pass
+
+    class Tomorrow(Day):
+        """Represents tomorrow."""
+
+        def __init__(self, now=None):
+            super().__init__((now or dt.datetime.now())+dt.timedelta(days=1))
+            pass
+
+        pass
+
+    class Hour(Date):
+        """Represents certain hour."""
+
+        @property
+        def _start(self):
+            """Get hour start."""
+            return self._now.replace(minute=0, second=0)
+
+        @property
+        def _end(self):
+            """Get hour end."""
+            return self._now.replace(minute=59, second=59)
+
+        @property
+        def prev(self):
+            """Get previous hour."""
+            now = self._now-dt.timedelta(hours=1)
+            return Calendar.Hour(now)
+
+        @property
+        def next(self):
+            """Get next hour."""
+            now = self._now+dt.timedelta(hours=1)
+            return Calendar.Hour(now)
+
+        pass
+
+    class Month(Date):
+        """Represents certain month."""
+
+        @property
+        def _start(self):
+            """Get month start."""
+            return self._now.replace(day=1, hour=0, minute=0, second=0)
+
+        @property
+        def _end(self):
+            """Get month end."""
+            day = cnd.monthrange(self._now.year, self._now.month)[1]
+            return self._now.replace(day=day, hour=23, minute=59, second=59)
+
+        @property
+        def prev(self):
+            """Get previous month."""
+            now = self._now.replace(day=1)-dt.timedelta(days=1)
+            return Calendar.Month(now)
+
+        pass
+
+    class Year(Date):
+        """Represents certain year."""
+
+        @property
+        def _start(self):
+            """Get year start."""
+            return self._now.replace(month=1, day=1, hour=0,
+                                     minute=0, second=0)
+
+        @property
+        def _end(self):
+            """Get year end."""
+            return self._now.replace(month=12, day=31, hour=23,
+                                     minute=59, second=59)
+
+        @property
+        def prev(self):
+            """Get previous year."""
+            now = self._now-dt.timedelta(days=365)
+            return Calendar.Year(now)
+
+        pass
+
+    pass
+
+
+###############################################################################
+#                      Module level configuration objects
+###############################################################################
 config = Configurator()
 config.load([user_config, home_config, local_config])
 
-nodemaker = NodeMaker()
-nodemaker.load()
+connector = Connector()
+connector.load()
 
+calendar = Calendar()
 
-# DEFAULT PARAMETERS
+###############################################################################
+#                              Default parameters
+###############################################################################
 DEBUG = False
 
 LOG_CONSOLE = True

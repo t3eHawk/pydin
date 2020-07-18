@@ -9,8 +9,8 @@ import sqlalchemy as sa
 import sqlparse as spe
 
 from .core import Item
-from .config import nodemaker
-from .config import Database
+from .config import connector
+from .config import Localhost, Server, Database
 from .logger import logger
 from .utils import to_sql
 
@@ -22,6 +22,40 @@ class Base(Item):
     transformable = False
     loadable = False
     executable = False
+
+    @property
+    def server(self):
+        """Get server object."""
+        return self._server
+
+    @server.setter
+    def server(self, value):
+        if isinstance(value, (Localhost, Server)):
+            self._server = value
+        elif isinstance(value, str):
+            if value == 'localhost':
+                self._server = Localhost()
+            else:
+                self._server = connector.create(value)
+        pass
+
+    @property
+    def db(self):
+        """Get database object (short)."""
+        return self._database
+
+    @property
+    def database(self):
+        """Get database object."""
+        return self._database
+
+    @database.setter
+    def database(self, value):
+        if isinstance(value, Database):
+            self._database = value
+        elif isinstance(value, str):
+            self._database = connector.create(value)
+        pass
 
     pass
 
@@ -185,24 +219,6 @@ class Table(Extractable, Loadable, Base):
         self.purge = purge
         self.append = append
 
-        pass
-
-    @property
-    def db(self):
-        """Describe database object (short)."""
-        return self._database
-
-    @property
-    def database(self):
-        """Describe database object."""
-        return self._database
-
-    @database.setter
-    def database(self, value):
-        if isinstance(value, Database):
-            self._database = value
-        elif isinstance(value, str):
-            self._database = nodemaker.create(value)
         pass
 
     @property
@@ -396,24 +412,6 @@ class Select(Extractable, Base):
         self.alias = alias
         self.fetch_size = fetch_size
 
-        pass
-
-    @property
-    def db(self):
-        """Get database object (short)."""
-        return self._database
-
-    @property
-    def database(self):
-        """Get database object."""
-        return self._database
-
-    @database.setter
-    def database(self, value):
-        if isinstance(value, Database):
-            self._database = value
-        elif isinstance(value, str):
-            self._database = nodemaker.create(value)
         pass
 
     @property
