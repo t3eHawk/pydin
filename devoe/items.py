@@ -787,3 +787,45 @@ class CSV(File):
 
     pass
 
+
+class JSON(File):
+    """Represents JSON file as ETL item."""
+
+    def __init__(self, item_name=None, path=None, file_name=None,
+                 encoding='utf-8', fetch_size=1000, purge=False):
+        super().__init__(item_name=(item_name or __class__.__name__),
+                         path=path, file_name=file_name, encoding=encoding,
+                         fetch_size=fetch_size, purge=purge)
+        pass
+
+    def parse(self):
+        """Parse JSON file and return its current content."""
+        if not self.empty:
+            with open(self.path, 'r', encoding=self.encoding) as fh:
+                return json.load(fh)
+        else:
+            return []
+        pass
+
+    def extract(self, step):
+        """Extract data from JSON file."""
+        with open(self.path, 'r', encoding=self.encoding) as fh:
+            rows = json.load(fh)
+            length = len(rows)
+            start = 0
+            end = start+self.fetch_size
+            while start < length:
+                yield rows[start:end]
+                start += self.fetch_size
+                end = start+self.fetch_size
+        pass
+
+    def load(self, step, dataset):
+        """Load data to JSON file."""
+        content = self.parse()
+        with open(self.path, 'w', encoding=self.encoding) as fh:
+            json.dump(content+dataset, fh, indent=2)
+        pass
+
+    pass
+
