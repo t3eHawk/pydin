@@ -4,6 +4,7 @@ import csv
 import datetime as dt
 import json
 import os
+import re
 import stat
 import threading as th
 import time as tm
@@ -14,9 +15,10 @@ import sqlalchemy as sa
 import sqlparse as spe
 
 from .core import Item
-from .config import connector
+from .config import connector, calendar
 from .config import Localhost, Server, Database
 from .logger import logger
+
 from .utils import to_sql
 
 
@@ -564,7 +566,7 @@ class Select(Extractable, Base):
 
 
 class File(Extractable, Loadable, Base):
-    """Represents JSON file as ETL item."""
+    """Represents file as ETL item."""
 
     def __init__(self, item_name=None, path=None, file_name=None,
                  encoding='utf-8', fetch_size=1000, purge=False):
@@ -879,6 +881,183 @@ class XML(File):
             dom = xdom.parseString(string)
             dom.writexml(fh, addindent='  ', newl='\n')
         pass
+
+    pass
+
+
+class Files(Extractable, Base):
+    """Represents file sequence as ETL Item."""
+
+    def __init__(self, item_name=None, server='localhost', path=None,
+                 recursive=None, mask=None, created=None):
+        super().__init__(name=(item_name or __class__.__name__))
+        self.server = server
+        self.path = path
+        self.recursive = recursive
+        self.mask = mask
+        self.created = created
+        pass
+
+    @property
+    def path(self):
+        """Get files path."""
+        return self._path
+
+    @path.setter
+    def path(self, value):
+        if isinstance(value, str) or value is None:
+            self._path = value
+        pass
+
+    @property
+    def recursive(self):
+        """Get recursive flag that allows to scan subdirectories."""
+        return self._recursive
+
+    @recursive.setter
+    def recursive(self, value):
+        if isinstance(value, bool) or value is None:
+            self._recursive = value
+        pass
+
+    @property
+    def mask(self):
+        """Get file mask that helps to filter files by filenames."""
+        return self._mask
+
+    @mask.setter
+    def mask(self, value):
+        if isinstance(value, str) or value is None:
+            self._mask = value
+        pass
+
+    @property
+    def created(self):
+        """Get date range that helps to filter files by created date."""
+        return self._created
+
+    @created.setter
+    def created(self, value):
+        if isinstance(value, (str, (dict, list, tuple))) or value is None:
+            self._created = value
+        pass
+
+    def read(self):
+        """Read full list of files."""
+        for record in self.walk():
+            path = record['path']
+            logger.debug(f'{path} found')
+            yield record
+        pass
+
+    def filter(self):
+        """Generate filtered list of files."""
+        date_from, date_to = self.between()
+        logger.info(f'Files will be filtered by dates: {date_from}, {date_to}')
+        for record in self.read():
+            path = record['path']
+            mtime = record['mtime']
+            # size = record['size']
+            if self.mask is not None:
+                if re.match(self.mask, os.path.basename(path)) is None:
+                    logger.debug(f'{path} filtered by mask')
+                    continue
+            if mtime < date_from or mtime > date_to:
+                logger.debug(f'{path} filtered by date')
+                continue
+            logger.debug(f'{path} matched')
+            yield record
+        pass
+
+    def walk(self, dir=None):
+        """Generate list of necessary files."""
+        dir = dir or self.path
+        if isinstance(self.server, Localhost) is True:
+            dir = os.path.normpath(dir)
+            if os.path.exists(dir) is True:
+                for filename in os.listdir(dir):
+                    path = os.path.join(dir, filename)
+                    stats = os.stat(path)
+                    isdir, isfile, mtime, size = self.explore(stats)
+                    if isdir is True and self.recursive is True:
+                        yield from self.walk(dir=path)
+                    elif isfile is True or isdir is True:
+                        root = os.path.normpath(self.path)
+                        relpath = os.path.relpath(dir, self.path)
+                        row = dict(server=self.server.host, path=path,
+                                   root=root, dir=relpath, filename=filename,
+                                   isdir=isdir, isfile=isfile,
+                                   mtime=mtime, size=size)
+                        yield row
+        elif self.server.sftp is True:
+            if self.server.exists(dir) is True:
+                conn = self.server.connect()
+                for stats in conn.sftp.listdir_attr(dir):
+                    isdir, isfile, mtime, size = self.explore(stats)
+                    if isdir is True and self.recursive is True:
+                        yield from self.walk(dir=path)
+                    elif isfile is True or isdir is True:
+                        path = conn.sftp.normalize(f'{dir}/{stats.filename}')
+                        relpath = os.path.relpath(dir, self.path)
+                        row = dict(server=self.server.host, path=path,
+                                   root=self.path, dir=relpath,
+                                   filename=stats.filename,
+                                   isdir=isdir, isfile=isfile,
+                                   mtime=mtime, size=size)
+                        yield row
+        # NOT FINISHED YET AND NOT RECOMMENDED TO USE WHEN ROOT HAVE FOLDERS
+        # FTP support is pretty poor. So here not all FTP server will return
+        # modification time and script will certainly fail in case of directory
+        # found.
+        elif self.server.ftp is True:
+            if self.server.exists(dir) is True:
+                conn = self.server.connect()
+                for path in conn.ftp.nlst():
+                    filename = os.path.basename(path)
+                    relpath = '.'
+                    isdir = False
+                    isfile = True
+                    mtime = conn.ftp.sendcmd(f'MDTM {path}')[4:]
+                    mtime = dt.datetime.strptime(mtime, '%Y%m%d%H%M%S')
+                    size = conn.ftp.size(path)
+                    row = dict(server=self.server.host, path=path,
+                               root=self.path, dir=relpath, filename=filename,
+                               isdir=isdir, isfile=isfile,
+                               mtime=mtime, size=size)
+                    yield row
+        pass
+
+    def explore(self, stats):
+        """Get main properties from file statistics."""
+        isdir = stat.S_ISDIR(stats.st_mode)
+        isfile = stat.S_ISREG(stats.st_mode)
+        mtime = dt.datetime.fromtimestamp(stats.st_mtime)
+        size = stats.st_size
+        return (isdir, isfile, mtime, size)
+
+    def between(self):
+        """Parse date range used for file filtering."""
+        today = getattr(self.pipeline, 'calendar', None) or calendar.Today()
+        if isinstance(self.created, (dict, list, tuple)):
+            if isinstance(self.created, dict):
+                date_from = self.created.get('date_from', 'None')
+                date_to = self.created.get('date_to', 'None')
+            elif isinstance(self.created, (list, tuple)):
+                date_from = self.created[0]
+                date_to = self.created[1]
+            date_from = eval(date_from, {'calendar': today}) or dt.datetime.min
+            date_to = eval(date_to, {'calendar': today}) or dt.datetime.max
+        elif isinstance(self.created, str) is True:
+            date_from = eval(self.created, {'calendar': today})
+            date_to = dt.datetime.max
+        else:
+            date_from = dt.datetime.min
+            date_to = dt.datetime.max
+        return (date_from, date_to)
+
+    def extract(self, step):
+        """Extract data with file description."""
+        yield list(self.filter())
 
     pass
 
