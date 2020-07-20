@@ -20,10 +20,11 @@ import queue
 import pepperoni as pe
 import sqlalchemy as sa
 
-from .config import config
+from .config import config, calendar
 from .config import Logging
-from .db import db
 from .logger import logger
+from .db import db
+
 from .utils import locate, register
 from .utils import coalesce
 from .utils import to_datetime, to_timestamp
@@ -947,9 +948,8 @@ class Task():
 
     def __init__(self, name=None, date=None, logging=None, json=None):
         self.id = None
-        self.name = name if isinstance(name, str) else None
-        self.date = (date if isinstance(date, dt.datetime)
-                     else dt.datetime.now())
+        self.name = name
+        self.date = date
         self.job = None
         self.job_id = None
         self.run_id = None
@@ -962,6 +962,7 @@ class Task():
             self.job_id = cache.Job.id
             self.run_id = cache.Job.run_id
             logger.info(f'Used {cache.Job} configuration for {self}')
+        self.calendar = calendar.Day(self.date)
 
         self.logging = logging if isinstance(logging, Logging) else Logging()
         self.logger = self.logging.task.setup()
@@ -996,6 +997,32 @@ class Task():
             return f'Task[{self.job.id}:{self.job.run_id}]'
         else:
             return 'Task'
+        pass
+
+    @property
+    def name(self):
+        """Get task name."""
+        return self._name
+
+    @name.setter
+    def name(self, value):
+        if isinstance(value, str):
+            self._name = value
+        else:
+            self._name = None
+        pass
+
+    @property
+    def date(self):
+        """Get task date."""
+        return self._date
+
+    @date.setter
+    def date(self, value):
+        if isinstance(value, dt.datetime):
+            self._date = value
+        else:
+            self._date = dt.datetime.now()
         pass
 
     @property

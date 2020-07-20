@@ -614,7 +614,7 @@ class Calendar():
         @now.setter
         def now(self, value):
             if isinstance(value, dt.datetime) or value is None:
-                self._now = value
+                self._now = value.replace(microsecond=0)
             pass
 
         @property
