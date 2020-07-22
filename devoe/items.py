@@ -2,10 +2,13 @@
 
 import csv
 import datetime as dt
+import gzip
 import json
 import os
 import re
+import shutil
 import stat
+import tempfile
 import threading as th
 import time as tm
 import xml.etree.ElementTree as xet
@@ -43,7 +46,7 @@ class Base(Item):
             if value == 'localhost':
                 self._server = Localhost()
             else:
-                self._server = connector.create(value)
+                self._server = connector.receive(value)
         pass
 
     @property
@@ -61,7 +64,7 @@ class Base(Item):
         if isinstance(value, Database):
             self._database = value
         elif isinstance(value, str):
-            self._database = connector.create(value)
+            self._database = connector.receive(value)
         pass
 
     pass
@@ -363,8 +366,8 @@ class Table(Extractable, Loadable, Base):
         conn = self.db.connect()
         table = self.get_table()
         query = table.delete()
-        answerset = conn.execute(query)
-        logger.info(f'{answerset.rowcount} {self.table_name} records deleted')
+        result = conn.execute(query)
+        logger.info(f'{result.rowcount} {self.table_name} records deleted')
         pass
 
     def truncate(self):
@@ -604,7 +607,7 @@ class File(Extractable, Loadable, Base):
 
     @property
     def encoding(self):
-        """Get CSV file target encoding."""
+        """Get file target encoding."""
         return self._encoding
 
     @encoding.setter
@@ -645,15 +648,15 @@ class File(Extractable, Loadable, Base):
         pass
 
     def delete(self):
-        """Delete all data in the file."""
+        """Delete all file data."""
         open(self.path, 'w+').close()
-        logger.info(f'All {self.path} records deleted')
+        logger.info(f'File {self.path} was completely purged')
         pass
 
     def prepare(self):
-        """Prepare CSV file for ETL operation."""
+        """Prepare file for ETL operation."""
         if self.purge is True:
-            logger.debug(f'CSV file {self.path} will be purged')
+            logger.debug(f'File {self.path} will be completely purged')
             self.delete()
         pass
 
@@ -953,7 +956,7 @@ class Files(Extractable, Base):
     def filter(self):
         """Generate filtered list of files."""
         date_from, date_to = self.between()
-        logger.info(f'Files will be filtered by dates: {date_from}, {date_to}')
+        logger.info(f'Using dates [{date_from}, {date_to}] to filter files')
         for record in self.read():
             path = record['path']
             mtime = record['mtime']
@@ -975,8 +978,8 @@ class Files(Extractable, Base):
         if isinstance(self.server, Localhost) is True:
             dir = os.path.normpath(dir)
             if os.path.exists(dir) is True:
-                for filename in os.listdir(dir):
-                    path = os.path.join(dir, filename)
+                for file in os.listdir(dir):
+                    path = os.path.join(dir, file)
                     stats = os.stat(path)
                     isdir, isfile, mtime, size = self.explore(stats)
                     if isdir is True and self.recursive is True:
@@ -984,8 +987,8 @@ class Files(Extractable, Base):
                     elif isfile is True or isdir is True:
                         root = os.path.normpath(self.path)
                         relpath = os.path.relpath(dir, self.path)
-                        row = dict(server=self.server.host, path=path,
-                                   root=root, dir=relpath, filename=filename,
+                        row = dict(server=self.server, path=path,
+                                   root=root, dir=relpath, file=file,
                                    isdir=isdir, isfile=isfile,
                                    mtime=mtime, size=size)
                         yield row
@@ -999,9 +1002,9 @@ class Files(Extractable, Base):
                     elif isfile is True or isdir is True:
                         path = conn.sftp.normalize(f'{dir}/{stats.filename}')
                         relpath = os.path.relpath(dir, self.path)
-                        row = dict(server=self.server.host, path=path,
+                        row = dict(server=self.server, path=path,
                                    root=self.path, dir=relpath,
-                                   filename=stats.filename,
+                                   file=stats.filename,
                                    isdir=isdir, isfile=isfile,
                                    mtime=mtime, size=size)
                         yield row
@@ -1020,7 +1023,7 @@ class Files(Extractable, Base):
                     mtime = conn.ftp.sendcmd(f'MDTM {path}')[4:]
                     mtime = dt.datetime.strptime(mtime, '%Y%m%d%H%M%S')
                     size = conn.ftp.size(path)
-                    row = dict(server=self.server.host, path=path,
+                    row = dict(host=self.server, path=path,
                                root=self.path, dir=relpath, filename=filename,
                                isdir=isdir, isfile=isfile,
                                mtime=mtime, size=size)
@@ -1061,3 +1064,768 @@ class Files(Extractable, Base):
 
     pass
 
+
+class FileManager(Loadable, Base):
+    """Represents file manager as ETL Item."""
+
+    def __init__(self, item_name=None, server='localhost', action='copy',
+                 dest=None, nodir=False, zip=False, unzip=False,
+                 tempname=False):
+        super().__init__(name=(item_name or __class__.__name__))
+        self.server = server
+        self.action = action
+        self.dest = dest
+        self.nodir = nodir
+        self.zip = zip
+        self.unzip = unzip
+        self.tempname = tempname
+        pass
+
+    @property
+    def action(self):
+        """Get action value that must be executed by file manager."""
+        return self._action
+
+    @action.setter
+    def action(self, value):
+        if isinstance(value, str) or value is None:
+            self._action = value
+        pass
+
+    @property
+    def dest(self):
+        """Get destination file directories used for file processing."""
+        return self._dest
+
+    @dest.setter
+    def dest(self, value):
+        if isinstance(value, (str, list, tuple)) or value is None:
+            if isinstance(value, str):
+                self._dest = [value]
+            elif isinstance(value, list):
+                self._dest = value
+            elif isinstance(value, tuple):
+                self._dest = [item for item in value]
+            elif value is None:
+                self._dest = []
+        pass
+
+    @property
+    def nodir(self):
+        """Get flag defining whether directories must be processed or not."""
+        return self._nodir
+
+    @nodir.setter
+    def nodir(self, value):
+        if isinstance(value, bool) or value is None:
+            self._nodir = value
+        pass
+
+    @property
+    def zip(self):
+        """Get flag defining whether files must be zipped or not."""
+        return self._zip
+
+    @zip.setter
+    def zip(self, value):
+        if isinstance(value, bool) or value is None:
+            self._zip = value
+        pass
+
+    @property
+    def unzip(self):
+        """Get flag defining whether files must be unzipped or not."""
+        return self._unzip
+
+    @unzip.setter
+    def unzip(self, value):
+        if isinstance(value, bool) or value is None:
+            self._unzip = value
+        pass
+
+    @property
+    def tempname(self):
+        """Get static name used for temporary files."""
+        return self._tempname
+
+    @tempname.setter
+    def tempname(self, value):
+        if isinstance(value, (str, bool)) or value is None:
+            self._tempname = value
+        pass
+
+    def process(self, fileinfo):
+        """Perform requested action for particular file."""
+        server = fileinfo['server']
+        path = fileinfo['path']
+        logger.debug(f'Processing {path}')
+        try:
+            # Source and target are local.
+            if (
+                isinstance(self.server, Localhost)
+                and isinstance(server, Localhost)
+            ):
+                logger.debug('On localhost by OS')
+                if self.action in ('copy', 'move'):
+                    self._copy_on_localhost(fileinfo)
+                if self.action in ('move', 'delete'):
+                    self._delete_on_localhost(fileinfo)
+            # Source and target are the same remote, SSH enabled.
+            elif (
+                server == self.server
+                and server.ssh is True
+            ):
+                logger.debug('On remote by SSH')
+                if self.action in ('copy', 'move'):
+                    self._copy_on_remote_by_ssh(fileinfo)
+                if self.action in ('move', 'delete'):
+                    self._delete_on_remote_by_ssh(fileinfo)
+            # Source and target are the same remote, SFTP enabled.
+            elif (
+                server == self.server
+                and server.sftp is True
+            ):
+                logger.debug('On remote by SFTP and OS')
+                if self.action in ('copy', 'move'):
+                    self._copy_on_remote_by_sftp(fileinfo)
+                if self.action in ('move', 'delete'):
+                    self._delete_on_remote_by_sftp(fileinfo)
+            # Source and target are the same remote, FTP enabled.
+            elif (
+                server == self.server
+                and server.ftp is True
+            ):
+                logger.debug('On remote by FTP and OS')
+                if self.action in ('copy', 'move'):
+                    self._copy_on_remote_by_ftp(fileinfo)
+                if self.action in ('move', 'delete'):
+                    self._delete_on_remote_by_ftp(fileinfo)
+            # Source is local, target is remote, SFTP enabled.
+            elif (
+                server != self.server
+                and isinstance(server, Localhost)
+                and isinstance(self.server, Server)
+                and self.server.sftp is True
+            ):
+                logger.debug('To remote by SFTP')
+                if self.action in ('copy', 'move'):
+                    self._copy_from_localhost_to_remote_by_sftp(fileinfo)
+                if self.action in ('move', 'delete'):
+                    self._delete_on_localhost(fileinfo)
+            # Source is remote, target is local, SFTP enabled.
+            elif (
+                server != self.server
+                and isinstance(server, Server)
+                and isinstance(self.server, Localhost)
+                and server.sftp is True
+            ):
+                logger.debug('To localhost by SFTP')
+                if self.action in ('copy', 'move'):
+                    self._copy_from_remote_to_localhost_by_sftp(fileinfo)
+                if self.action in ('move', 'delete'):
+                    self._delete_on_remote_by_sftp(fileinfo)
+            # Source is local, target is remote, FTP enabled.
+            elif (
+                server != self.server
+                and isinstance(server, Localhost)
+                and isinstance(self.server, Server)
+                and self.server.ftp is True
+            ):
+                logger.debug('To remote by FTP')
+                if self.action in ('copy', 'move'):
+                    self._copy_from_localhost_to_remote_by_ftp(fileinfo)
+                if self.action in ('move', 'delete'):
+                    self._delete_on_localhost(fileinfo)
+            # Source is remote, target is local, FTP enabled.
+            elif (
+                server != self.server
+                and isinstance(server, Server) is True
+                and isinstance(self.server, Localhost) is True
+                and server.ftp is True
+            ):
+                logger.debug('To localhost by FTP')
+                if self.action in ('copy', 'move'):
+                    self._copy_from_remote_to_localhost_by_ftp(fileinfo)
+                if self.action in ('move', 'delete'):
+                    self._delete_on_remote_by_ftp(fileinfo)
+            # Source and target are different remotes, SFTP on both enabled.
+            elif (
+                server != self.server
+                and isinstance(server, Server)
+                and isinstance(self.server, Server)
+                and server.sftp is True
+                and self.server.sftp is True
+            ):
+                logger.debug('From remote by SFTP to remote by SFTP')
+                if self.action in ('copy', 'move'):
+                    self._copy_from_remote_to_remote_by_sftp(fileinfo)
+                if self.action in ('move', 'delete'):
+                    self._delete_on_remote_by_sftp(fileinfo)
+            # Source and target are different remotes, FTP on both enabled.
+            elif (
+                server != self.server
+                and isinstance(server, Server)
+                and isinstance(self.server, Server)
+                and server.ftp is True
+                and self.server.ftp is True
+            ):
+                logger.debug('From remote by FTP to remote by FTP')
+                if self.action in ('copy', 'move'):
+                    self._copy_from_remote_to_remote_by_ftp(fileinfo)
+                if self.action in ('move', 'delete'):
+                    self._delete_on_remote_by_ftp(fileinfo)
+            # Source and target are different remotes, FTP enabled on source,
+            # SFTP enabled on target.
+            elif (
+                server != self.server
+                and isinstance(server, Server)
+                and isinstance(self.server, Server)
+                and server.ftp is True
+                and self.server.sftp is True
+            ):
+                logger.debug('From remote by FTP to remote by SFTP')
+                if self.action in ('copy', 'move'):
+                    self._copy_from_remote_by_ftp_to_remote_by_sftp(fileinfo)
+                if self.action in ('move', 'delete'):
+                    self._delete_on_remote_by_ftp(fileinfo)
+            # Source and target are different remotes, SFTP enabled on source,
+            # FTP enabled on target.
+            elif (
+                server != self.server
+                and isinstance(server, Server)
+                and isinstance(self.server, Server)
+                and server.sftp is True
+                and self.server.ftp is True
+            ):
+                logger.debug('From remote by SFTP to remote by FTP')
+                if self.action in ('copy', 'move'):
+                    self._copy_from_remote_by_sftp_to_remote_by_ftp(fileinfo)
+                if self.action in ('move', 'delete'):
+                    self._delete_on_remote_by_sftp(fileinfo)
+        except Exception:
+            logger.warning()
+            pass
+        pass
+
+    def load(self, step, dataset):
+        """Load files into file manager and process them."""
+        for fileinfo in dataset:
+            self.process(fileinfo)
+        pass
+
+    def _copy_on_localhost(self, fileinfo):
+        for path in self.dest:
+            logger.debug(f'To {path}')
+            if fileinfo['isfile'] is True:
+                source = fileinfo['path']
+                dir = fileinfo['dir'] if self.nodir is False else '.'
+                file = fileinfo['file']
+                dest = os.path.normpath(os.path.join(path, dir))
+                if os.path.exists(dest) is False:
+                    os.makedirs(dest)
+                dest = os.path.join(dest, file)
+                if self.unzip == 'gz' or self.unzip is True:
+                    dest = os.path.splitext(dest)[0]
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with gzip.open(source, 'rb') as fhi:
+                        with open(temp or dest, 'wb') as fho:
+                            fho.write(fhi.read())
+                    if temp is not None:
+                        os.rename(temp, dest)
+                    logger.info(f'Unzipped {source} to {dest}')
+                    continue
+                if self.zip == 'gz' or self.zip is True:
+                    dest = f'{dest}.gz'
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with open(source, 'rb') as fhi:
+                        with gzip.open(temp or dest, 'wb') as fho:
+                            fho.write(fhi.read())
+                    if temp is not None:
+                        os.rename(temp, dest)
+                    logger.info(f'Zipped {source} to {dest}')
+                    continue
+                temp = f'{dest}.tmp' if self.tempname is True else None
+                shutil.copyfile(source, temp or dest)
+                if temp is not None:
+                    os.rename(temp, dest)
+                logger.info(f'Copied {source} to {dest}')
+        pass
+
+    def _copy_on_remote_by_ssh(self, fileinfo):
+        remote = fileinfo['server']
+        conn = remote.connect()
+        for path in self.dest:
+            if fileinfo['isfile'] is True:
+                logger.debug(f'To {path}')
+                source = fileinfo['path']
+                dir = fileinfo['dir'] if self.nodir is False else '.'
+                file = fileinfo['file']
+                dest = f'{path}/{dir}'
+                conn.execute(f'mkdir -p {dest}')
+                dest = f'{dest}/{file}'
+                if self.unzip == 'gz' or self.unzip is True:
+                    dest = os.path.splitext(dest)[0]
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    conn.execute(f'gunzip -c {source} > {temp or dest}')
+                    if temp is not None:
+                        conn.execute(f'mv {temp} {dest}')
+                    logger.info(f'Unzipped {remote}:{source} '
+                                f'to {remote}:{dest}')
+                    continue
+                if self.zip == 'gz' or self.zip is True:
+                    dest = f'{dest}.gz'
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    conn.execute(f'gzip -c {source} > {temp or dest}')
+                    if temp is not None:
+                        conn.execute(f'mv {temp} {dest}')
+                    logger.info(f'Zipped {remote}:{source} to {remote}:{dest}')
+                    continue
+                temp = f'{dest}.tmp' if self.tempname is True else None
+                conn.execute(f'cp {source} {temp or dest}')
+                if temp is not None:
+                    conn.execute(f'mv {temp} {dest}')
+                logger.info(f'Copied {conn}:{source} to {conn}:{dest}')
+        pass
+
+    def _copy_on_remote_by_sftp(self, fileinfo):
+        self._copy_from_remote_to_remote_by_sftp(fileinfo)
+        pass
+
+    def _copy_on_remote_by_ftp(self, fileinfo):
+        self._copy_from_remote_to_remote_by_ftp(fileinfo)
+        pass
+
+    def _copy_from_remote_to_localhost_by_sftp(self, fileinfo):
+        isfile = fileinfo['isfile']
+        if isfile is True:
+            remote = fileinfo['server']
+            conn = remote.connect()
+            source = fileinfo['path']
+            dir = fileinfo['dir'] if self.nodir is False else '.'
+            file = fileinfo['file']
+            for path in self.dest:
+                logger.debug(f'To {path}')
+                dest = os.path.normpath(os.path.join(path, dir))
+                if os.path.exists(dest) is False:
+                    os.makedirs(dest)
+                dest = os.path.join(dest, file)
+                if self.unzip == 'gz' or self.unzip is True:
+                    dest = os.path.splitext(dest)[0]
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with tempfile.TemporaryFile() as fhi:
+                        conn.sftp.getfo(source, fhi)
+                        fhi.seek(0)
+                        with gzip.GzipFile(fileobj=fhi) as gz:
+                            with open(temp or dest, 'wb') as fho:
+                                shutil.copyfileobj(gz, fho)
+                    if temp is not None:
+                        os.rename(temp, dest)
+                    logger.info(f'Unzipped {remote}:{source} to {dest}')
+                    continue
+                if self.zip == 'gz' or self.zip is True:
+                    dest = f'{dest}.gz'
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with gzip.open(temp or dest, 'wb') as fho:
+                        conn.sftp.getfo(source, fho)
+                    if temp is not None:
+                        os.rename(temp, dest)
+                    logger.info(f'Zipped {remote}:{source} to {dest}')
+                    continue
+                temp = f'{dest}.tmp' if self.tempname is True else None
+                conn.sftp.get(source, temp or dest)
+                if temp is not None:
+                    os.rename(temp, dest)
+                logger.info(f'Copied {remote}:{source} to {dest}')
+        pass
+
+    def _copy_from_localhost_to_remote_by_sftp(self, fileinfo):
+        isfile = fileinfo['isfile']
+        if isfile is True:
+            remote = self.server
+            conn = remote.connect()
+            source = fileinfo['path']
+            dir = fileinfo['dir'] if self.nodir is False else '.'
+            file = fileinfo['file']
+            for path in self.dest:
+                logger.debug(f'To {path}')
+                dest = conn.sftp.normalize(f'{path}/{dir}')
+                if remote.exists(dest) is False:
+                    conn.sftp.mkdir(dest)
+                dest = conn.sftp.normalize(f'{dest}/{file}')
+                if self.unzip == 'gz' or self.unzip is True:
+                    dest = os.path.splitext(dest)[0]
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with gzip.open(source, 'rb') as fhi:
+                        conn.sftp.putfo(fhi, temp or dest)
+                    if temp is not None:
+                        conn.sftp.rename(temp, dest)
+                    logger.info(f'Unzipped {source} to {remote}:{dest}')
+                    continue
+                if self.zip == 'gz' or self.zip is True:
+                    dest = f'{dest}.gz'
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with open(source, 'rb') as fhi:
+                        with tempfile.TemporaryFile() as fho:
+                            with gzip.GzipFile(filename=file, mode='wb',
+                                               fileobj=fho) as gz:
+                                shutil.copyfileobj(fhi, gz)
+                            fho.seek(0)
+                            conn.sftp.putfo(fho, temp or dest)
+                    if temp is not None:
+                        conn.sftp.rename(temp, dest)
+                    logger.info(f'Zipped {source} to {remote}:{dest}')
+                    continue
+                temp = f'{dest}.tmp' if self.tempname is True else None
+                conn.sftp.put(source, temp or dest)
+                if temp is not None:
+                    conn.sftp.rename(temp, dest)
+                logger.info(f'Copied {source} to {remote}:{dest}')
+        pass
+
+    def _copy_from_remote_to_remote_by_sftp(self, fileinfo):
+        isfile = fileinfo['isfile']
+        if isfile is True:
+            remote_in = fileinfo['server']
+            conn_in = remote_in.connect()
+            remote_out = self.server
+            conn_out = remote_out.connect()
+            source = fileinfo['path']
+            dir = fileinfo['dir'] if self.nodir is False else '.'
+            file = fileinfo['file']
+            for path in self.dest:
+                logger.debug(f'To {path}')
+                dest = conn_out.sftp.normalize(f'{path}/{dir}')
+                if remote_out.exists(dest) is False:
+                    conn_out.sftp.mkdir(dest)
+                dest = conn_out.sftp.normalize(f'{dest}/{file}')
+                if self.unzip == 'gz' or self.unzip is True:
+                    dest = os.path.splitext(dest)[0]
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with tempfile.TemporaryFile() as th:
+                        conn_in.sftp.getfo(source, th)
+                        th.seek(0)
+                        with gzip.GzipFile(fileobj=th) as gz:
+                            conn_out.sftp.putfo(gz, temp or dest)
+                    if temp is not None:
+                        conn_out.sftp.rename(temp, dest)
+                    logger.info(f'Unzipped {remote_in}:{source} to '
+                                f'{remote_out}:{dest}')
+                    continue
+                if self.zip == 'gz' or self.zip is True:
+                    dest = f'{dest}.gz'
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with tempfile.TemporaryFile() as th:
+                        with gzip.GzipFile(filename=file, mode='wb',
+                                           fileobj=th) as gz:
+                            conn_in.sftp.getfo(source, gz)
+                        th.seek(0)
+                        conn_out.sftp.putfo(th, temp or dest)
+                    if temp is not None:
+                        conn_out.sftp.rename(temp, dest)
+                    logger.info(f'Zipped {remote_in}:{source} to '
+                                f'{remote_out}:{dest}')
+                    continue
+                temp = f'{dest}.tmp' if self.tempname is True else None
+                with tempfile.TemporaryFile() as th:
+                    conn_in.sftp.getfo(source, th)
+                    th.seek(0)
+                    conn_out.sftp.putfo(th, temp or dest)
+                if temp is not None:
+                    conn_out.sftp.rename(temp, dest)
+                logger.info(f'Copied {remote_in}:{source} to '
+                            f'{remote_out}:{dest}')
+        pass
+
+    def _copy_from_localhost_to_remote_by_ftp(self, fileinfo):
+        isfile = fileinfo['isfile']
+        if isfile is True:
+            remote = self.server
+            conn = remote.connect()
+            source = fileinfo['path']
+            dir = fileinfo['dir'] if self.nodir is False else '.'
+            file = fileinfo['file']
+            for path in self.dest:
+                logger.debug(f'To {path}')
+                dest = f'{path}/{dir}'
+                if remote.exists(dest) is False:
+                    conn.ftp.mkd(dest)
+                dest = f'{dest}/{file}'
+                if self.unzip == 'gz' or self.unzip is True:
+                    dest = os.path.splitext(dest)[0]
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with gzip.open(source) as fhi:
+                        with tempfile.TemporaryFile() as fho:
+                            shutil.copyfileobj(fhi, fho)
+                            fho.seek(0)
+                            conn.ftp.storbinary(f'STOR {temp or dest}', fho)
+                    if temp is not None:
+                        conn.ftp.rename(temp, dest)
+                    logger.info(f'Unzipped {source} to {remote}:{dest}')
+                    continue
+                if self.zip == 'gz' or self.zip is True:
+                    dest = f'{dest}.gz'
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with open(source, 'rb') as fhi:
+                        with tempfile.TemporaryFile() as fho:
+                            with gzip.GzipFile(filename=file, mode='wb',
+                                               fileobj=fho) as gz:
+                                shutil.copyfileobj(fhi, gz)
+                            fho.seek(0)
+                            conn.ftp.storbinary(f'STOR {temp or dest}', fho)
+                    if temp is not None:
+                        conn.ftp.rename(temp, dest)
+                    logger.info(f'Zipped {source} to {remote}:{dest}')
+                    continue
+                temp = f'{dest}.tmp' if self.tempname is True else None
+                with open(source, 'rb') as fhi:
+                    conn.ftp.storbinary(f'STOR {temp or dest}', fhi)
+                if temp is not None:
+                    conn.ftp.rename(temp, dest)
+                logger.info(f'Copied {source} to {remote}:{dest}')
+        pass
+
+    def _copy_from_remote_to_localhost_by_ftp(self, fileinfo):
+        isfile = fileinfo['isfile']
+        if isfile is True:
+            remote = fileinfo['server']
+            conn = remote.connect()
+            source = fileinfo['path']
+            dir = fileinfo['dir'] if self.nodir is False else '.'
+            file = fileinfo['file']
+            for path in self.dest:
+                logger.debug(f'To {path}')
+                dest = os.path.normpath(os.path.join(path, dir))
+                if os.path.exists(dest) is False:
+                    os.makedirs(dest)
+                dest = os.path.join(dest, file)
+                if self.unzip == 'gz' or self.unzip is True:
+                    dest = os.path.splitext(dest)[0]
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with tempfile.TemporaryFile() as fhi:
+                        conn.ftp.retrbinary(f'RETR {source}', fhi.write)
+                        fhi.seek(0)
+                        with gzip.GzipFile(fileobj=fhi) as gz:
+                            with open(temp or dest, 'wb') as fho:
+                                shutil.copyfileobj(gz, fho)
+                    if temp is not None:
+                        os.rename(temp, dest)
+                    logger.info(f'Unzipped {remote}:{source} to {dest}')
+                    continue
+                if self.zip == 'gz' or self.zip is True:
+                    dest = f'{dest}.gz'
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with tempfile.TemporaryFile() as fhi:
+                        conn.ftp.retrbinary(f'RETR {source}', fhi.write)
+                        fhi.seek(0)
+                        with gzip.open(temp or dest, 'wb') as fho:
+                            shutil.copyfileobj(fhi, fho)
+                    if temp is not None:
+                        os.rename(temp, dest)
+                    logger.info(f'Zipped {remote}:{source} to {dest}')
+                    continue
+                temp = f'{dest}.tmp' if self.tempname is True else None
+                with open(temp or dest, 'wb') as fho:
+                    conn.ftp.retrbinary(f'RETR {source}', fho.write)
+                if temp is not None:
+                    os.rename(temp, dest)
+                logger.info(f'Copied {remote}:{source} to {dest}')
+        pass
+
+    def _copy_from_remote_to_remote_by_ftp(self, fileinfo):
+        isfile = fileinfo['isfile']
+        if isfile is True:
+            remote_in = fileinfo['server']
+            conn_in = remote_in.connect()
+            remote_out = self.server
+            conn_out = remote_out.connect()
+            source = fileinfo['path']
+            dir = fileinfo['dir'] if self.nodir is False else '.'
+            file = fileinfo['file']
+            for path in self.dest:
+                logger.debug(f'To {path}')
+                dest = f'{path}/{dir}'
+                if remote_out.exists(dest) is False:
+                    conn_out.ftp.mkd(dest)
+                dest = f'{dest}/{file}'
+                if self.unzip == 'gz' or self.unzip is True:
+                    dest = os.path.splitext(dest)[0]
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with tempfile.TemporaryFile() as th:
+                        conn_in.ftp.retrbinary(f'RETR {source}', th.write)
+                        th.seek(0)
+                        with gzip.GzipFile(fileobj=th) as gz:
+                            conn_out.ftp.storbinary(f'STOR {temp or dest}', gz)
+                    if temp is not None:
+                        conn_out.ftp.rename(temp, dest)
+                    logger.info(f'Unzipped {remote_in}:{source} to '
+                                f'{remote_out}:{dest}')
+                    continue
+                if self.zip == 'gz' or self.zip is True:
+                    dest = f'{dest}.gz'
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with tempfile.TemporaryFile() as th:
+                        with gzip.GzipFile(filename=file, mode='wb',
+                                           fileobj=th) as gz:
+                            conn_in.ftp.retrbinary(f'RETR {source}', gz.write)
+                        th.seek(0)
+                        conn_out.ftp.storbinary(f'STOR {temp or dest}', th)
+                    if temp is not None:
+                        conn_out.ftp.rename(temp, dest)
+                    logger.info(f'Zipped {remote_in}:{source} to '
+                                f'{remote_out}:{dest}')
+                    continue
+                temp = f'{dest}.tmp' if self.tempname is True else None
+                with tempfile.TemporaryFile() as th:
+                    conn_in.ftp.retrbinary(f'RETR {source}', th.write)
+                    th.seek(0)
+                    conn_out.ftp.storbinary(f'STOR {temp or dest}', th)
+                if temp is not None:
+                    conn_out.ftp.rename(temp, dest)
+                logger.info(f'Copied {remote_in}:{source} '
+                            f'to {remote_out}:{dest}')
+        pass
+
+    def _copy_from_remote_by_ftp_to_remote_by_sftp(self, fileinfo):
+        isfile = fileinfo['isfile']
+        if isfile is True:
+            remote_in = fileinfo['server']
+            conn_in = remote_in.connect()
+            remote_out = self.server
+            conn_out = remote_out.connect()
+            source = fileinfo['path']
+            dir = fileinfo['dir'] if self.nodir is False else '.'
+            file = fileinfo['file']
+            for path in self.dest:
+                logger.debug(f'To {path}')
+                dest = conn_out.sftp.normalize(f'{path}/{dir}')
+                if remote_out.exists(dest) is False:
+                    conn_out.sftp.mkdir(dest)
+                dest = conn_out.sftp.normalize(f'{dest}/{file}')
+                if self.unzip == 'gz' or self.unzip is True:
+                    dest = os.path.splitext(dest)[0]
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with tempfile.TemporaryFile() as fhi:
+                        conn_in.ftp.retrbinary(f'RETR {source}', fhi.write)
+                        fhi.seek(0)
+                        with gzip.GzipFile(fileobj=fhi) as gz:
+                            conn_out.sftp.putfo(gz, temp or dest)
+                    if temp is not None:
+                        conn_out.sftp.rename(temp, dest)
+                    logger.info(f'Unzipped {remote_in}:{source} to '
+                                f'{remote_out}:{dest}')
+                    continue
+                if self.zip == 'gz' or self.zip is True:
+                    dest = f'{dest}.gz'
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with tempfile.TemporaryFile() as fhi:
+                        with gzip.GzipFile(filename=file, mode='wb',
+                                           fileobj=fhi) as gz:
+                            conn_in.ftp.retrbinary(f'RETR {source}', gz.write)
+                        fhi.seek(0)
+                        conn_out.sftp.putfo(fhi, temp or dest)
+                    if temp is not None:
+                        conn_out.sftp.rename(temp, dest)
+                    logger.info(f'Zipped {remote_in}:{source} to '
+                                f'{remote_out}:{dest}')
+                    continue
+                temp = f'{dest}.tmp' if self.tempname is True else None
+                with tempfile.TemporaryFile() as th:
+                    conn_in.ftp.retrbinary(f'RETR {source}', th.write)
+                    th.seek(0)
+                    conn_out.sftp.putfo(th, temp or dest)
+                if temp is not None:
+                    conn_out.sftp.rename(temp, dest)
+                logger.info(f'Copied {remote_in}:{source} '
+                            f'to {remote_out}:{dest}')
+        pass
+
+    def _copy_from_remote_by_sftp_to_remote_by_ftp(self, fileinfo):
+        isfile = fileinfo['isfile']
+        if isfile is True:
+            remote_in = fileinfo['server']
+            conn_in = remote_in.connect()
+            remote_out = self.server
+            conn_out = remote_out.connect()
+            source = fileinfo['path']
+            dir = fileinfo['dir'] if self.nodir is False else '.'
+            file = fileinfo['file']
+            for path in self.dest:
+                logger.debug(f'To {path}')
+                dest = f'{path}/{dir}'
+                if remote_out.exists(dest) is False:
+                    conn_out.ftp.mkd(dest)
+                dest = f'{dest}/{file}'
+                if self.unzip == 'gz' or self.unzip is True:
+                    dest = os.path.splitext(dest)[0]
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with tempfile.TemporaryFile() as fhi:
+                        conn_in.sftp.getfo(source, fhi)
+                        fhi.seek(0)
+                        with gzip.GzipFile(fileobj=fhi) as gz:
+                            conn_out.ftp.storbinary(f'STOR {temp or dest}', gz)
+                    if temp is not None:
+                        conn_out.ftp.rename(temp, dest)
+                    logger.info(f'Unzipped {remote_in}:{source} to '
+                                f'{remote_out}:{dest}')
+                    continue
+                if self.zip == 'gz' or self.zip is True:
+                    dest = f'{dest}.gz'
+                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    with tempfile.TemporaryFile() as fho:
+                        with gzip.GzipFile(filename=file, mode='wb',
+                                           fileobj=fho) as gz:
+                            conn_in.sftp.getfo(source, gz)
+                        fho.seek(0)
+                        conn_out.ftp.storbinary(f'STOR {temp or dest}', fho)
+                    if temp is not None:
+                        conn_out.ftp.rename(temp, dest)
+                    logger.info(f'Zipped {remote_in}:{source} to '
+                                f'{remote_out}:{dest}')
+                    continue
+                temp = f'{dest}.tmp' if self.tempname is True else None
+                with tempfile.TemporaryFile() as th:
+                    conn_in.sftp.getfo(source, th)
+                    th.seek(0)
+                    conn_out.ftp.storbinary(f'STOR {dest}', th)
+                if temp is not None:
+                    conn_out.ftp.rename(temp, dest)
+                logger.info(f'Copied {remote_in}:{source} '
+                            f'to {remote_out}:{dest}')
+        pass
+
+    def _delete_on_localhost(self, fileinfo):
+        path = fileinfo['path']
+        isfile = fileinfo['isfile']
+        if isfile is True:
+            os.remove(path)
+            logger.info(f'Deleted {path}')
+        pass
+
+    def _delete_on_remote_by_ssh(self, fileinfo):
+        remote = fileinfo['server']
+        path = fileinfo['path']
+        isfile = fileinfo['isfile']
+        if isfile is True:
+            remote.execute(f'rm -f {path}')
+            logger.info(f'Deleted {remote}:{path}')
+        pass
+
+    def _delete_on_remote_by_sftp(self, fileinfo):
+        remote = fileinfo['server']
+        path = fileinfo['path']
+        isfile = fileinfo['isfile']
+        if isfile is True:
+            remote.sftp.remove(path)
+            logger.info(f'Deleted {remote}:{path}')
+        pass
+
+    def _delete_on_remote_by_ftp(self, fileinfo):
+        remote = fileinfo['server']
+        path = fileinfo['path']
+        isfile = fileinfo['isfile']
+        if isfile is True:
+            remote.ftp.delete(path)
+            logger.info(f'Deleted {remote}:{path}')
+        pass
+
+    pass

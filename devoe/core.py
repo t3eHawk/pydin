@@ -1185,13 +1185,13 @@ class Task():
 
     def _start(self):
         logger.info(f'Starting {self}...')
-        logger.info(f'{self}: {[step.graph for step in self.steps.values()]}')
         self.start_date = dt.datetime.now()
         self.status = 'S'
         self.id = self.logger.root.table.primary_key
         if self.id is not None:
-            logger.info(f'{self} takes ID {self.id} '
-                        f'in {self.logging.task.table}')
+            table = self.logger.root.table.proxy
+            select = f'SELECT * FROM {table} WHERE id = {self.id}'
+            logger.info(f'{self} DB query: {select}')
         self.logger.table(start_date=self.start_date,
                           job_id=self.job_id,
                           run_id=self.run_id,
@@ -1205,6 +1205,7 @@ class Task():
 
     def _execute(self):
         logger.info(f'Executing {self}...')
+        logger.info(f'{self} steps: {[s.graph for s in self.steps.values()]}')
         try:
             self.status = 'R'
             self.execute()
@@ -1491,7 +1492,7 @@ class Item(Element):
                 return
             else:
                 seqno += 1
-                name = f'{self.name} {seqno}'
+                name = f'{self.name}-{seqno}'
         self.pipeline.items[name] = self
         logger.debug(f'{self} attached to {pipeline}')
         pass
@@ -1557,8 +1558,12 @@ class Step(Element):
         pass
 
     def __repr__(self):
-        """Represent step with its name."""
-        return self.name
+        """Represent step."""
+        if self.id is not None:
+            return f'{self.name}[{self.id}]'
+        else:
+            return self.name
+        pass
 
     @property
     def step_name(self):
@@ -1791,7 +1796,7 @@ class Step(Element):
                 return
             else:
                 seqno += 1
-                name = f'{self.name} {seqno}'
+                name = f'{self.name}-{seqno}'
         self.pipeline.steps[name] = self
         self.initiator = self.pipeline.initiator
         self.logging = self.pipeline.logging
@@ -1816,13 +1821,13 @@ class Step(Element):
 
     def _start(self):
         logger.info(f'Starting {self}...')
-        logger.info(f'{self} is {self.type} operation: {self.graph}')
         self.start_date = dt.datetime.now()
         self.status = 'S'
         self.id = self.logger.root.table.primary_key
         if self.id is not None:
-            logger.info(f'{self} takes ID {self.id} '
-                        f'in {self.logging.step.table}')
+            table = self.logger.root.table.proxy
+            select = f'SELECT * FROM {table} WHERE id = {self.id}'
+            logger.info(f'{self} DB query: {select}')
         self.logger.table(start_date=self.start_date,
                           task_id=self.pipeline.id,
                           job_id=self.pipeline.job_id,
@@ -1844,6 +1849,7 @@ class Step(Element):
 
     def _execute(self):
         logger.info(f'Executing {self}...')
+        logger.info(f'{self} is {self.type} operation: {self.graph}')
         try:
             self.status = 'R'
             if self.type == 'ETL':

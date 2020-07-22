@@ -19,7 +19,7 @@ filename = 'devoe.ini'
 user_config = os.path.abspath(os.path.expanduser(f'~/.devoe/{filename}'))
 home_config = os.path.join(home, filename) if home is not None else None
 local_config = os.path.join(os.path.dirname(sys.argv[0]), filename)
-nodes_config = os.path.abspath(os.path.expanduser(f'~/.devoe/index.ini'))
+index_config = os.path.abspath(os.path.expanduser(f'~/.devoe/index.ini'))
 
 
 class Configurator(dict):
@@ -142,7 +142,7 @@ class Logging():
             if isinstance(database, Database) is True:
                 self.database = database
             elif isinstance(database, str):
-                self.database = connector.create(database)
+                self.database = connector.receive(database)
             else:
                 module = il.import_module('devoe.db')
                 self.database = module.db
@@ -261,7 +261,7 @@ class Logging():
             if isinstance(database, Database) is True:
                 self.database = database
             elif isinstance(database, str):
-                self.database = connector.create(database)
+                self.database = connector.receive(database)
             else:
                 module = il.import_module('devoe.db')
                 self.database = module.db
@@ -394,11 +394,12 @@ class Localhost():
 
 
 class Server():
-    """Represents ordinary remote server and connection configuration to it."""
+    """Represents ordinary remote server."""
 
-    def __init__(self, host=None, port=None, user=None,
+    def __init__(self, name=None, host=None, port=None, user=None,
                  password=None, key=None, keyfile=None,
                  ssh=False, sftp=False, ftp=False):
+        self.name = name.lower() if isinstance(name, str) else None
         self.host = host if isinstance(host, str) else None
         self.port = port if isinstance(port, (str, int)) else None
 
@@ -411,7 +412,14 @@ class Server():
         self.ssh = ssh if isinstance(ssh, bool) else False
         self.sftp = sftp if isinstance(sftp, bool) else False
         self.ftp = ftp if isinstance(ftp, bool) else False
+
+        cache = il.import_module('devoe.cache')
+        cache.CONNECTIONS[f'{self.name}'] = self
         pass
+
+    def __repr__(self):
+        """Represent server as its name."""
+        return self.name
 
     class Connection():
         """Represents ordinary remote server connection."""
@@ -445,13 +453,31 @@ class Server():
                                       passwd=password)
             pass
 
+        def execute(self, command, **kwargs):
+            """Execute given command in server terminal."""
+            stdin, stdout, stderr = self.ssh.exec_command(command, **kwargs)
+            stdout = stdout.read().decode()
+            stderr = stderr.read().decode()
+            return stdout, stderr
+
+        pass
+
+    @property
+    def connection(self):
+        """Get active server connection."""
+        return self._connection
+
+    @connection.setter
+    def connection(self, value):
+        if isinstance(value, self.Connection):
+            self._connection = value
         pass
 
     def connect(self):
         """Connect to remote server."""
-        server = self
-        creds = self.creds
-        return self.Connection(server, creds)
+        if self.connection is None:
+            self.connection = self.Connection(self, self.creds)
+        return self.connection
 
     def exists(self, path):
         """Check if file with given path exists in file system."""
@@ -473,16 +499,24 @@ class Server():
 
 
 class Database(pe.Database):
-    """Represents database server and connection configuration to it."""
+    """Represents database server."""
 
-    def __init__(self, vendor=None, driver=None, path=None,
+    def __init__(self, name=None, vendor=None, driver=None, path=None,
                  host=None, port=None, sid=None, service=None,
                  user=None, password=None):
+        self.name = name.lower() if isinstance(name, str) else None
         super().__init__(vendor=vendor, driver=driver,
                          path=path, host=host, port=port,
                          sid=sid, service=service,
                          user=user, password=password)
+
+        cache = il.import_module('devoe.cache')
+        cache.CONNECTIONS[f'{self.name}'] = self
         pass
+
+    def __repr__(self):
+        """Represent database as its name."""
+        return self.name
 
     pass
 
@@ -494,13 +528,13 @@ class Connector(dict):
         super().__init__()
         pass
 
-    class Node():
-        """Represents remote node."""
+    class Connection():
+        """Represents connection objects factory."""
 
-        def __new__(self, **options):
-            """Create node instance using options passed."""
+        def __new__(self, name=None, **options):
+            """Create connection object using options passed."""
             if options.get('database') is True:
-                return Database(vendor=options['vendor'],
+                return Database(name=name, vendor=options['vendor'],
                                 driver=options.get('driver'),
                                 path=options.get('path'),
                                 host=options.get('host'),
@@ -514,7 +548,7 @@ class Connector(dict):
                 or options.get('sftp') is True
                 or options.get('ftp') is True
             ):
-                return Server(host=options.get('host'),
+                return Server(name=name, host=options.get('host'),
                               port=options.get('port'),
                               user=options.get('user'),
                               password=options.get('password'),
@@ -529,7 +563,7 @@ class Connector(dict):
 
     def load(self, path=None, encoding=None):
         """Load configuration from file."""
-        path = path or nodes_config
+        path = path or index_config
         parser = configparser.ConfigParser(allow_no_value=True)
         parser.read(path, encoding=encoding)
         for section in parser.sections():
@@ -547,25 +581,31 @@ class Connector(dict):
                         continue
                 elif option in ('host', 'port', 'user',
                                 'password', 'key', 'keyfile',
-                                'vendor', 'driver', 'path', 'sid', 'service'):
+                                'vendor', 'driver',
+                                'path', 'sid', 'service'):
                     self[section][option] = value
         return self
 
-    def create(self, name):
-        """Generate Node instance using configuration found by record name."""
+    def receive(self, name):
+        """Receive connection object using its name."""
         if isinstance(name, str):
             name = name.lower()
             try:
-                options = self[name]
-            except KeyError as error:
-                path = nodes_config
-                message = f'no record with name <{name}> found, check {path}'
-                traceback = error.__traceback__
-                raise Exception(message).with_traceback(traceback)
-            else:
-                return self.Node(**options)
+                cache = il.import_module('devoe.cache')
+                return cache.CONNECTIONS[name]
+            except KeyError:
+                try:
+                    options = self[name]
+                except KeyError as error:
+                    path = index_config
+                    message = f'no record named <{name}> found, check {path}'
+                    traceback = error.__traceback__
+                    raise Exception(message).with_traceback(traceback)
+                else:
+                    return self.Connection(name=name, **options)
         else:
-            raise TypeError(f'name must be str, not {name.__class__.__name__}')
+            message = f'name must be str, not {name.__class__.__name__}'
+            raise TypeError(message)
         pass
 
     pass
