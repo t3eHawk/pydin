@@ -1526,7 +1526,7 @@ class Step(Element):
     def type(self):
         """Determine step type."""
         if self.a.executable:
-            return 'X'
+            return 'EX'
         elif self.a.extractable and self.b.loadable:
             return 'EL'
         elif self.a.extractable and self.b.transformable and self.c.loadable:
@@ -1756,8 +1756,9 @@ class Step(Element):
                 self.b.prepare()
                 self.a.to_extractor(self, self.queue)
                 self.b.to_loader(self, self.queue)
-            elif self.type == 'X':
-                self.to_executor(self)
+            elif self.type == 'EX':
+                self.a.prepare()
+                self.a.to_executor(self)
             for thread in self.threads:
                 logger.debug(f'Waiting for {thread.name} to finish...')
                 thread.join()
