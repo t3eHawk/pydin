@@ -103,11 +103,13 @@ class Configurator(dict):
 class Logging():
     """Represents logging configurator used for special loggers."""
 
-    def __init__(self, task=True, step=False, database=None,
-                 schema=None, table=None,  **fields):
+    def __init__(self, task=True, step=False, file=False,
+                 database=None, schema=None, table=None,  **fields):
         self.metadata = sa.MetaData()
 
-        if task is False:
+        if task is True:
+            self.task = self.Task(self, table='de_task_history')
+        elif task is False:
             self.task = self.Task(self, table=None)
         elif isinstance(task, dict):
             self.task = self.Task(self, table=task.get('table', table),
@@ -119,10 +121,12 @@ class Logging():
             self.task = self.Task(self, table=table, schema=schema,
                                   database=database, **fields)
 
-        if step is False:
-            self.step = self.Step(self, table=True)
+        if step is True:
+            self.step = self.Step(self, table='de_step_history')
+        elif step is False:
+            self.step = self.Step(self, table=None)
         elif isinstance(step, dict):
-            self.step = self.Step(self, table=step.get('table', step),
+            self.step = self.Step(self, table=step.get('table'),
                                   schema=step.get('schema', schema),
                                   database=step.get('database', database),
                                   **step.get('fields', {}))
@@ -130,10 +134,23 @@ class Logging():
             table = None if not isinstance(step, str) else step
             self.step = self.Step(self, table=table, schema=schema,
                                   database=database)
+
+        if file is True:
+            self.file = self.File(self, table='de_file_history')
+        elif file is False:
+            self.file = self.File(self, table=None)
+        elif isinstance(file, dict):
+            self.file = self.File(self, table=file.get('table'),
+                                  schema=file.get('schema', schema),
+                                  database=file.get('database', database))
+        else:
+            table = None if not isinstance(file, str) else file
+            self.file = self.File(self, table=table, schema=schema,
+                                  database=database)
         pass
 
     class Task():
-        """Represents a generator for the task logger."""
+        """Represents task logger configurator."""
 
         def __init__(self, logging, database=None,
                      schema=None, table=None, **fields):
@@ -242,7 +259,7 @@ class Logging():
         pass
 
     class Step():
-        """Represents a generator for the step logger."""
+        """Represents step logger configurator."""
 
         def __init__(self, logging, database=None,
                      schema=None, table=None, **fields):
@@ -356,6 +373,70 @@ class Logging():
                 logger.configure(db={'database': self.database,
                                      'name': self.table,
                                      'date_column': date_column})
+            return logger
+
+        pass
+
+    class File():
+        """Represents file logger configurator."""
+
+        def __init__(self, logging, database=None, schema=None, table=None):
+            self.logging = logging if isinstance(logging, Logging) else None
+            self.database = database if isinstance(database, str) else None
+            if isinstance(database, Database) is True:
+                self.database = database
+            elif isinstance(database, str):
+                self.database = connector.receive(database)
+            else:
+                module = il.import_module('devoe.db')
+                self.database = module.db
+            self.schema = schema if isinstance(schema, str) else None
+            self.table = table if isinstance(table, str) else None
+            pass
+
+        def create_table(self):
+            """Create database table used for logging."""
+            name = self.table
+            schema = self.schema
+            metadata = self.logging.metadata
+            columns = [sa.Column('id', sa.Integer, sa.Sequence(f'{name}_seq'),
+                                 primary_key=True,
+                                 comment='Unique file ID'),
+                       sa.Column('job_id', sa.Integer,
+                                 comment='Job that processed the file'),
+                       sa.Column('run_id', sa.Integer,
+                                 comment='Run that processed the file'),
+                       sa.Column('task_id', sa.Integer,
+                                 comment='Task that processed the file'),
+                       sa.Column('step_id', sa.String(30),
+                                 comment='Step that processed the file'),
+                       sa.Column('server', sa.String(30),
+                                 comment='Host name having the file'),
+                       sa.Column('file_name', sa.String(256),
+                                 comment='Name of the file'),
+                       sa.Column('file_date', sa.DateTime,
+                                 comment='File modification time'),
+                       sa.Column('file_size', sa.Integer,
+                                 comment='File size in bytes'),
+                       sa.Column('start_date', sa.DateTime,
+                                 comment='Date when file process started'),
+                       sa.Column('end_date', sa.DateTime,
+                                 comment='Date when file process ended')]
+            table = sa.Table(name, metadata, *columns, schema=schema)
+            table.create(self.database.engine, checkfirst=True)
+            return table
+
+        def setup(self):
+            """Configure database logger."""
+            logger = pe.logger(f'devoe.file.logger', table=True,
+                               console=False, file=False, email=False)
+            if self.table is None:
+                logger.configure(table=False)
+            else:
+                if not self.database.engine.has_table(self.table):
+                    self.create_table()
+                logger.configure(db={'database': self.database,
+                                     'name': self.table})
             return logger
 
         pass
