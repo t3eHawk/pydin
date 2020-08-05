@@ -4,9 +4,10 @@ import datetime as dt
 import importlib as imp
 import os
 import re
-import sqlparse
 import subprocess as sp
 import sys
+
+import sqlparse
 
 from .logger import logger
 
@@ -139,5 +140,7 @@ def to_python(file, args=None):
 
 def to_sql(text):
     """Format given SQL text."""
-    return sqlparse.format(text, keyword_case='upper', identifier_case='lower',
-                           strip_comments=True, reindent_aligned=True)
+    result = sqlparse.format(text, keyword_case='upper',
+                             identifier_case='lower',
+                             reindent_aligned=True)
+    return result
