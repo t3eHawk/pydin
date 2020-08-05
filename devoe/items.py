@@ -611,15 +611,18 @@ class Select(Extractable, Base):
     def parse(self):
         """Parse into SQL text object."""
         text = self.text
-        text = self._format_text(text)
-        text = self._hintinize_text(text)
+        text = self._format(text)
+        text = self._hintinize(text)
         query = sa.text(text)
         return query
 
     def describe(self):
         """Get a real column list from the answerset."""
         conn = self.db.connect()
-        query = to_sql(f'select * from ({self.query}) where 1 = 0')
+        query = self.query
+        query = self._format(query)
+        query = self._hintinize(query)
+        query = to_sql(f'select * from ({query}) where 1 = 0')
         answerset = conn.execute(query)
         columns = answerset.keys()
         return columns
@@ -649,11 +652,11 @@ class Select(Extractable, Base):
         """Extract data."""
         return self.fetch()
 
-    def _format_text(self, text):
-        text = text.format(p=self.pipeline)
+    def _format(self, text):
+        text = text.format(task=self.pipeline)
         return text
 
-    def _hintinize_text(self, text):
+    def _hintinize(self, text):
         if self.db.vendor == 'oracle':
             statements = spe.parse(text)
             tvalue = 'SELECT'
