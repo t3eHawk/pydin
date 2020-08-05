@@ -411,6 +411,101 @@ class Table(Extractable, Loadable, Base):
     pass
 
 
+class SQL(Executable, Base):
+    """Represents SQL script as ETL Item."""
+
+    def __init__(self, item_name=None, database=None, text=None, file=None,
+                 parallel=False):
+        super().__init__(name=(item_name or __class__.__name__))
+        self.database = database
+        self.text = text
+        self.file = file
+        self.parallel = parallel
+        pass
+
+    @property
+    def text(self):
+        """Get raw SQL text."""
+        return self._text
+
+    @text.setter
+    def text(self, value):
+        if isinstance(value, str):
+            self._text = to_sql(value)
+        pass
+
+    @property
+    def file(self):
+        """Get path to file containing select SQL text."""
+        return self._file
+
+    @file.setter
+    def file(self, value):
+        if isinstance(value, str):
+            self._file = os.path.abspath(value)
+            if os.path.exists(self._file):
+                self.text = open(self.file, 'r').read()
+        pass
+
+    @property
+    def query(self):
+        """Get foramtted SQL text object that can be executed in database."""
+        query = self.parse()
+        return query
+
+    @property
+    def parallel(self):
+        """Get parallel flag."""
+        return self._parallel
+
+    @parallel.setter
+    def parallel(self, value):
+        if isinstance(value, (int, bool)):
+            self._parallel = value
+        pass
+
+    def parse(self):
+        """Parse into SQL text object."""
+        text = self.text
+        text = self._format(text)
+        text = self._hintinize(text)
+        query = sa.text(text)
+        return query
+
+    def execute(self, step):
+        """Execute action."""
+        query = self.query
+        conn = self.db.connect()
+        logger.info(f'Running SQL query...')
+        logger.line(f'-------------------\n{query}\n-------------------')
+        result = conn.execute(query)
+        logger.info(f'SQL query completed')
+        return result
+
+    def _format(self, text):
+        text = text.format(task=self.pipeline)
+        return text
+
+    def _hintinize(self, text):
+        if self.db.vendor == 'oracle':
+            statements = spe.parse(text)
+            tvalue = 'SELECT'
+            ttype = spe.tokens.Keyword.DML
+            parallel = self.parallel
+            if parallel > 0:
+                degree = '' if parallel is True else f'({parallel})'
+                hint = f'/*+ parallel{degree} */'
+                for i, token in enumerate(statements[0].tokens):
+                    if token.match(ttype, tvalue):
+                        tvalue = f'{tvalue} {hint}'
+                        new_token = spe.sql.Token(ttype, tvalue)
+                        statements[0].tokens[i] = new_token
+            text = str(statements[0])
+        return text
+
+    pass
+
+
 class Select(Extractable, Base):
     """Represents SQL select as ETL Item."""
 
