@@ -676,6 +676,216 @@ class Select(Extractable, Base):
     pass
 
 
+class Insert(Executable, Base):
+    """Represents SQL insert as ETL Item."""
+
+    def __init__(self, item_name=None, database=None, schema=None, table=None,
+                 select=None, purge=False, append=False, parallel=False):
+        super().__init__(name=(item_name or __class__.__name__))
+        self.database = database
+        self.schema = schema
+        self.table = table
+        self.select = select
+        self.purge = purge
+        self.append = append
+        self.parallel = parallel
+        pass
+
+    @property
+    def schema(self):
+        """Get inserting table schema name."""
+        return self._schema
+
+    @schema.setter
+    def schema(self, value):
+        if isinstance(value, str):
+            self._schema = value.lower()
+        elif value is None:
+            self._schema = None
+        pass
+
+    @property
+    def table(self):
+        """Get inserting table name."""
+        return self._table
+
+    @table.setter
+    def table(self, value):
+        if isinstance(value, str):
+            self._table = value.lower()
+        elif value is None:
+            self._table = None
+        pass
+
+    @property
+    def address(self):
+        """Get full inserting table address."""
+        table = self.table
+        table = table if self.schema is None else f'{self.schema}.{table}'
+        table = table if self.db_link is None else f'{table}@{self.db_link}'
+        return table
+
+    @property
+    def purge(self):
+        """Get flag defining whether data purge is needed or not."""
+        return self._purge
+
+    @purge.setter
+    def purge(self, value):
+        if isinstance(value, bool):
+            self._purge = value
+        pass
+
+    @property
+    def append(self):
+        """Get append flag."""
+        return self._append
+
+    @append.setter
+    def append(self, value):
+        if isinstance(value, (int, bool)) or value is None:
+            self._append = value
+        pass
+
+    @property
+    def parallel(self):
+        """Get parallel flag."""
+        return self._parallel
+
+    @parallel.setter
+    def parallel(self, value):
+        if isinstance(value, (int, bool)) or value is None:
+            self._parallel = value
+        pass
+
+    @property
+    def object(self):
+        """Get object representing inserting table."""
+        name = self.table
+        meta = sa.MetaData()
+        engine = self.db.engine
+        table = sa.Table(name, meta, schema=self.schema,
+                         autoload=True, autoload_with=engine)
+        return table
+
+    @property
+    def text(self):
+        """Get raw SQL select text."""
+        return self._select
+
+    @property
+    def select(self):
+        """Get formatted SQL select text."""
+        return self._select
+
+    @select.setter
+    def select(self, value):
+        if isinstance(value, str):
+            if os.path.isfile(value):
+                value = open(value, 'r').read()
+            self._select = to_sql(value)
+        elif value is None:
+            self._select = None
+        pass
+
+    @property
+    def query(self):
+        """Get foramtted SQL text object that can be executed in database."""
+        query = self.parse()
+        return query
+
+    def parse(self):
+        """Parse into SQL text object."""
+        table = self.object
+        insert = table.insert()
+        columns = [sa.column(column) for column in self.describe()]
+        select = sa.text(f'\n{self.select}').columns(*columns)
+        query = insert.from_select(columns, select)
+        query = str(query)
+        query = self._format(query)
+        query = self._hintinize(query)
+        return query
+
+    def describe(self):
+        """Get a real column list from the answerset."""
+        conn = self.db.connect()
+        query = self.select
+        query = self._format(query)
+        query = self._hintinize(query)
+        query = to_sql(f'select * from ({query}) where 1 = 0')
+        answerset = conn.execute(query)
+        columns = answerset.keys()
+        return columns
+
+    def delete(self):
+        """Delete table data."""
+        conn = self.db.connect()
+        table = self.object
+        query = table.delete()
+        result = conn.execute(query)
+        logger.info(f'{result.rowcount} {self.table} records deleted')
+        pass
+
+    def truncate(self):
+        """Truncate table data."""
+        conn = self.db.engine.connect()
+        table = self.address
+        query = sa.text(f'truncate table {table}')
+        conn.execute(query)
+        logger.info(f'Table {self.table} truncated')
+        pass
+
+    def prepare(self):
+        """Prepare table."""
+        if self.purge is True:
+            logger.debug(f'Table {self.table} will be purged')
+            if self.db.vendor == 'oracle':
+                self.truncate()
+            else:
+                self.delete()
+        pass
+
+    def execute(self, step):
+        """Execute action."""
+        query = self.parse()
+        conn = self.db.connect()
+        logger.info(f'Running SQL query...')
+        logger.line(f'-------------------\n{query}\n-------------------')
+        result = conn.execute(query)
+        logger.info(f'SQL query completed')
+        return result.rowcount
+
+    def _format(self, text):
+        text = text.format(task=self.pipeline)
+        return text
+
+    def _hintinize(self, text):
+        if self.db.vendor == 'oracle':
+            statements = spe.parse(text)
+            if self.parallel > 0:
+                tvalue = 'SELECT'
+                ttype = spe.tokens.Keyword.DML
+                degree = '' if self.parallel is True else f'({self.parallel})'
+                hint = f'/*+ parallel{degree} */'
+                for i, token in enumerate(statements[0].tokens):
+                    if token.match(ttype, tvalue):
+                        tvalue = f'{tvalue} {hint}'
+                        new_token = spe.sql.Token(ttype, tvalue)
+                        statements[0].tokens[i] = new_token
+            if self.append is True:
+                tvalue = 'INSERT'
+                ttype = spe.tokens.Keyword.DML
+                hint = '/*+ append */'
+                for i, token in enumerate(statements[0].tokens):
+                    if token.match(ttype, tvalue):
+                        tvalue = f'{tvalue} {hint}'
+                        new_token = spe.sql.Token(ttype, tvalue)
+                        statements[0].tokens[i] = new_token
+            text = str(statements[0])
+        return text
+
+    pass
+
 
 class File(Extractable, Loadable, Base):
     """Represents file as ETL item."""
