@@ -179,14 +179,25 @@ class Executable():
 
     executable = True
 
-    def executor(self):
-        """."""
-        raise NotImplementedError
-        pass
+    def to_executor(self, step):
+        """Start Item executor."""
+        name = f'{step.thread.name}-Executor'
+        target = dict(target=self.executor, args=(step,))
+        self.thread = th.Thread(name=name, **target, daemon=True)
+        step.threads.append(self.thread)
+        logger.debug(f'Starting {self.thread.name}...')
+        return self.thread.start()
 
-    def execute():
-        """."""
-        raise NotImplementedError
+    def executor(self, step):
+        """Execute instructions."""
+        try:
+            result = self.execute(step)
+            if isinstance(result, int):
+                setattr(step, 'result_value', result)
+            elif isinstance(result, (list, tuple, dict, str)):
+                setattr(step, 'result_long', result)
+        except Exception:
+            logger.error()
         pass
 
     pass
