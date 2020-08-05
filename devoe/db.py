@@ -55,11 +55,11 @@ class Database(pe.Database):
             return self._schedule
 
         @property
-        def history(self):
-            """HISTORY table."""
-            if hasattr(self, '_history') is False:
-                self._history = self.database.table('de_history')
-            return self._history
+        def run_history(self):
+            """RUN_HISTORY table."""
+            if hasattr(self, '_run_history') is False:
+                self._run_history = self.database.table('de_run_history')
+            return self._run_history
 
         @property
         def components(self):

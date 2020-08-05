@@ -301,7 +301,7 @@ class Scheduler():
         # Define failed runs and send them on re-execution.
         logger.debug('Requesting rerun...')
         try:
-            h = db.tables.history
+            h = db.tables.run_history
             s = db.tables.schedule
             select = (sa.select([h.c.id, h.c.job_id, h.c.job_date,
                                  h.c.added, h.c.rerun_times,
@@ -404,7 +404,7 @@ class Scheduler():
             logger.info(f'Adding {repr} to the queue...')
             logger.debug(f'Creating new run history record for {repr}...')
             conn = db.connect()
-            table = db.tables.history
+            table = db.tables.run_history
             insert = (table.insert().
                       values(job_id=id,
                              job_date=date,
@@ -464,7 +464,7 @@ class Scheduler():
             logger.warning(f'{repr} timeout exceeded')
             try:
                 conn = db.connect()
-                table = db.tables.history
+                table = db.tables.run_history
                 update = (table.update().
                           values(status='T').
                           where(table.c.id == run))
@@ -479,7 +479,7 @@ class Scheduler():
                 logger.info(F'{repr} completed with error')
                 try:
                     conn = db.connect()
-                    table = db.tables.history
+                    table = db.tables.run_history
                     update = (table.update().
                               values(status='E',
                                      text_error=proc.stderr.read().decode()).
@@ -664,7 +664,7 @@ class Job():
         elif isinstance(self.run_id, int) is True:
             logger.debug(f'{self} declared with Run[{self.run_id}]')
             conn = db.connect()
-            table = db.tables.history
+            table = db.tables.run_history
             select = table.select().where(table.c.id == self.run_id)
             result = conn.execute(select).first()
             if result is None:
@@ -737,7 +737,7 @@ class Job():
     def _new(self):
         logger.debug(f'New run history record will be created for {self}')
         conn = db.connect()
-        table = db.tables.history
+        table = db.tables.run_history
         insert = (table.insert().
                   values(job_id=self.id,
                          job_date=self.date,
@@ -759,7 +759,7 @@ class Job():
         logger.debug(f'Updating Run[{self.run_id}] history record '
                      f'with following values {kwargs}')
         conn = db.connect()
-        table = db.tables.history
+        table = db.tables.run_history
         updated = dt.datetime.now()
         update = (table.update().values(updated=self.updated, **kwargs).
                   where(table.c.id == self.run_id))
@@ -771,7 +771,7 @@ class Job():
         logger.debug(f'Updating source Run[{self.source_id}] history record '
                      f'with following values {kwargs}')
         conn = db.connect()
-        table = db.tables.history
+        table = db.tables.run_history
         updated = dt.datetime.now()
         update = (table.update().values(updated=updated, **kwargs).
                   where(table.c.id == self.source_id))
@@ -800,7 +800,7 @@ class Job():
         logger.info(f'Canceling {self}...')
         self.status = 'C'
         conn = db.connect()
-        table = db.tables.history
+        table = db.tables.run_history
         update = (table.update().
                   values(updated=self.updated,
                          status=self.status).
@@ -974,12 +974,9 @@ class Task():
         self._status = None
         self._records_read = 0
         self._records_written = 0
-        self._records_updated = 0
-        self._records_merged = 0
-        self._files_read = 0
-        self._files_written = 0
-        self._bytes_read = 0
-        self._bytes_written = 0
+        self._records_found = 0
+        self._files_found = 0
+        self._bytes_found = 0
         self.errors = []
 
         self.initiator = 'S' if getattr(self.job, 'auto', 0) > 0 else 'U'
@@ -1067,75 +1064,27 @@ class Task():
         pass
 
     @property
-    def records_updated(self):
-        """Get number of records updated."""
-        return self._records_updated
+    def result_value(self):
+        """Get short numeric result value."""
+        return self._result_value
 
-    @records_updated.setter
-    def records_updated(self, value):
+    @result_value.setter
+    def result_value(self, value):
         if isinstance(value, int):
-            self._records_updated += value
-            self.logger.table(records_updated=self.records_updated)
+            self._result_value = value
+            self.logger.table(result_value=self.result_value)
         pass
 
     @property
-    def records_merged(self):
-        """Get number of records merged."""
-        return self._records_merged
+    def result_long(self):
+        """Get long string result value."""
+        return self._result_long
 
-    @records_merged.setter
-    def records_merged(self, value):
-        if isinstance(value, int):
-            self._records_merged += value
-            self.logger.table(records_merged=self.records_merged)
-        pass
-
-    @property
-    def files_read(self):
-        """Get number of files read."""
-        return self._files_read
-
-    @files_read.setter
-    def files_read(self, value):
-        if isinstance(value, int):
-            self._files_read += value
-            self.logger.table(files_read=self.files_read)
-        pass
-
-    @property
-    def files_written(self):
-        """Get number of files written."""
-        return self._files_written
-
-    @files_written.setter
-    def files_written(self, value):
-        if isinstance(value, int):
-            self._files_written = value
-            self.logger.table(files_written=self.files_written)
-        pass
-
-    @property
-    def bytes_read(self):
-        """Get number of bytes read."""
-        return self._bytes_read
-
-    @bytes_read.setter
-    def bytes_read(self, value):
-        if isinstance(value, int):
-            self._bytes_read += value
-            self.logger.table(bytes_read=self.bytes_read)
-        pass
-
-    @property
-    def bytes_written(self):
-        """Get number of bytes written."""
-        return self._bytes_written
-
-    @bytes_written.setter
-    def bytes_written(self, value):
-        if isinstance(value, int):
-            self._bytes_written += value
-            self.logger.table(bytes_written=self.bytes_written)
+    @result_long.setter
+    def result_long(self, value):
+        if isinstance(value, (list, tuple, dict, str)):
+            self._result_long = value
+            self.logger.table(result_long=str(self.result_long))
         pass
 
     @property
@@ -1195,7 +1144,7 @@ class Task():
         self.logger.table(start_date=self.start_date,
                           job_id=self.job_id,
                           run_id=self.run_id,
-                          run_date=self.date,
+                          task_date=self.date,
                           **{key: value for key, value in self.__dict__.items()
                              if key in self.logging.task.optional
                              and self.logging.task.fields[key] is True})
@@ -1542,12 +1491,9 @@ class Step(Element):
         self._status = None
         self._records_read = 0
         self._records_written = 0
-        self._records_updated = 0
-        self._records_merged = 0
-        self._files_read = 0
-        self._files_written = 0
-        self._bytes_read = 0
-        self._bytes_written = 0
+        self._records_found = 0
+        self._result_value = 0
+        self._result_long = 0
         self.errors = []
 
         self.initiator = None
@@ -1662,81 +1608,29 @@ class Step(Element):
         pass
 
     @property
-    def records_updated(self):
-        """Get number of records updated."""
-        return self._records_updated
+    def result_value(self):
+        """Get short numeric result value."""
+        return self._result_value
 
-    @records_updated.setter
-    def records_updated(self, value):
+    @result_value.setter
+    def result_value(self, value):
         if isinstance(value, int):
-            self._records_updated += value
-            self.pipeline.records_updated = value
-            self.logger.table(records_updated=self.records_updated)
+            self._result_value = value
+            self.pipeline.result_value = value
+            self.logger.table(result_value=self.result_value)
         pass
 
     @property
-    def records_merged(self):
-        """Get number of records merged."""
-        return self._records_merged
+    def result_long(self):
+        """Get long string result value."""
+        return self._result_long
 
-    @records_merged.setter
-    def records_merged(self, value):
-        if isinstance(value, int):
-            self._records_merged += value
-            self.pipeline.records_merged = value
-            self.logger.table(records_merged=self.records_merged)
-        pass
-
-    @property
-    def files_read(self):
-        """Get number of files read."""
-        return self._files_read
-
-    @files_read.setter
-    def files_read(self, value):
-        if isinstance(value, int):
-            self._files_read += value
-            self.pipeline.files_read = value
-            self.logger.table(files_read=self.files_read)
-        pass
-
-    @property
-    def files_written(self):
-        """Get number of files written."""
-        return self._files_written
-
-    @files_written.setter
-    def files_written(self, value):
-        if isinstance(value, int):
-            self._files_written = value
-            self.pipeline.files_written = value
-            self.logger.table(files_written=self.files_written)
-        pass
-
-    @property
-    def bytes_read(self):
-        """Get number of bytes read."""
-        return self._bytes_read
-
-    @bytes_read.setter
-    def bytes_read(self, value):
-        if isinstance(value, int):
-            self._bytes_read += value
-            self.pipeline.bytes_read = value
-            self.logger.table(bytes_read=self.bytes_read)
-        pass
-
-    @property
-    def bytes_written(self):
-        """Get number of bytes written."""
-        return self._bytes_written
-
-    @bytes_written.setter
-    def bytes_written(self, value):
-        if isinstance(value, int):
-            self._bytes_written += value
-            self.pipeline.bytes_written = value
-            self.logger.table(bytes_written=self.bytes_written)
+    @result_long.setter
+    def result_long(self, value):
+        if isinstance(value, (list, tuple, dict, str)):
+            self._result_long = value
+            self.pipeline.result_long = value
+            self.logger.table(result_long=str(self.result_long))
         pass
 
     @property
@@ -1798,6 +1692,7 @@ class Step(Element):
                 seqno += 1
                 name = f'{self.name}-{seqno}'
         self.pipeline.steps[name] = self
+        self.date = self.pipeline.date
         self.initiator = self.pipeline.initiator
         self.logging = self.pipeline.logging
         self.logger = self.pipeline.logging.step.setup(self)
@@ -1832,9 +1727,9 @@ class Step(Element):
                           task_id=self.pipeline.id,
                           job_id=self.pipeline.job_id,
                           run_id=self.pipeline.run_id,
-                          run_date=self.pipeline.date,
                           step_name=self.name,
                           step_type=self.type,
+                          step_date=self.date,
                           **{key: value for key, value in self.__dict__.items()
                              if key in self.logging.step.optional
                              and self.logging.step.fields[key] is True})
