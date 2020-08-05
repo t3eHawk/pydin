@@ -1473,6 +1473,30 @@ class FileManager(Loadable, Base):
             self._tempname = value
         pass
 
+    def createlog(self):
+        """Generate special file logger."""
+        self.logger = self.pipeline.logging.file.setup()
+        pass
+
+    def startlog(self, step, fileinfo):
+        """Start particular file logging."""
+        self.logger.root.table.new()
+        self.logger.table(job_id=self.pipeline.job_id,
+                          run_id=self.pipeline.run_id,
+                          task_id=self.pipeline.id,
+                          step_id=step.id,
+                          server=fileinfo['server'].host,
+                          file_name=fileinfo['file'],
+                          file_date=fileinfo['mtime'],
+                          file_size=fileinfo['size'],
+                          start_date=dt.datetime.now())
+        pass
+
+    def endlog(self):
+        """End particular file logging."""
+        self.logger.table(end_date=dt.datetime.now())
+        pass
+
     def process(self, fileinfo):
         """Perform requested action for particular file."""
         server = fileinfo['server']
@@ -1626,10 +1650,17 @@ class FileManager(Loadable, Base):
             pass
         pass
 
+    def prepare(self):
+        """Prepare file processing."""
+        self.createlog()
+        pass
+
     def load(self, step, dataset):
         """Load files into file manager and process them."""
         for fileinfo in dataset:
+            self.startlog(step, fileinfo)
             self.process(fileinfo)
+            self.endlog()
         pass
 
     def _copy_on_localhost(self, fileinfo):
