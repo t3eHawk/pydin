@@ -1,11 +1,12 @@
 /*******************************************************************************
-SQL for devoe DB schema.
+Script to deploy a devoe DB schema in your SQLite environment.
+Just run the script then check if all objects created successfully.
 *******************************************************************************/
 
 create table de_schedule (
   id          integer primary key autoincrement,
-  job_name    text,
-  job_desc    text,
+  job         text,
+  description text,
   status      text default 'N',
   monthday    text,
   weekday     text,
@@ -18,17 +19,21 @@ create table de_schedule (
   environment text,
   arguments   text,
   timeout     integer,
-  reruns      integer,
-  days_rerun  integer,
-  persons     text,
+  maxreruns   integer,
+  maxdays     integer,
+  recipients  text,
   alarm       text,
-  debug       text
+  debug       text,
+  created     text,
+  updated     text
 );
 
 create table de_run_history (
   id          integer primary key autoincrement,
   job_id      integer,
-  job_date    text,
+  run_mode    text,
+  run_tag     integer,
+  run_date    text,
   added       text,
   start_date  text,
   end_date    text,
@@ -36,7 +41,6 @@ create table de_run_history (
   server      text,
   user        text,
   pid         integer,
-  initiator   text,
   trigger_id  integer,
   rerun_id    integer,
   rerun_seqno integer,
@@ -46,10 +50,11 @@ create table de_run_history (
   file_log    text,
   text_log    text,
   text_error  text,
-  updated     text,
+  data_dump   blob,
+  updated     text
 );
 
-create index de_run_history_job_id_ix
+create index de_run_history_job_ix
 on de_run_history (job_id);
 
 create index de_run_history_start_date_ix
@@ -69,7 +74,7 @@ create table de_task_history (
   status          text,
   records_read    integer,
   records_written integer,
-  errors_found    integer,
+  records_error   integer,
   result_value    integer,
   result_long     integer,
   updated         text
@@ -91,13 +96,13 @@ create table de_step_history (
   status          text,
   records_read    integer,
   records_written integer,
-  errors_found    integer,
+  records_error   integer,
   result_value    integer,
   result_long     text,
   updated         text
 );
 
-create table de_file_history (
+create table de_file_log (
   id          integer primary key autoincrement,
   job_id      integer,
   run_id      integer,
@@ -111,17 +116,37 @@ create table de_file_history (
   end_date    text
 );
 
+create table de_sql_log (
+  id          integer primary key autoincrement,
+  job_id      integer,
+  run_id      integer,
+  task_id     integer,
+  step_id     integer,
+  db_name     text,
+  schema_name text,
+  table_name  text,
+  query_type  text,
+  query_text  text,
+  start_date  text,
+  end_date    text,
+  output_rows integer,
+  output_text text,
+  error_code  integer,
+  error_text  text
+);
+
 create table de_components (
-  code       text primary key,
-  component  text,
+  id         text primary key,
   server     text,
   user       text,
   pid        integer,
+  url        text,
+  debug      text,
   start_date text,
   stop_date  text,
   status     text
 );
 
-insert into de_components (code, component) values ('SHD', 'Scheduler');
-insert into de_components (code, component) values ('API', 'API');
+insert into de_components (id) values ('SCHEDULER');
+insert into de_components (id) values ('RESTAPI');
 commit;
