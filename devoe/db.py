@@ -68,6 +68,57 @@ class Database(pe.Database):
                 self._components = self.database.table('de_components')
             return self._components
 
+    class Record():
+        """."""
+
+        def __init__(self, database, table, id=None):
+            self.database = database
+            self.table = table
+            self.id = id
+            pass
+
+        def select(self, id):
+            """."""
+            self.id = id
+            return self.id
+
+        def create(self):
+            """."""
+            conn = db.connect()
+            table = self.table
+            insert = table.insert()
+            result = conn.execute(insert)
+            self.id = result.inserted_primary_key[0]
+            return self.id
+
+        def read(self):
+            """."""
+            if self.id:
+                conn = self.database.connect()
+                table = self.table
+                select = table.select().where(table.c.id == self.id)
+                result = conn.execute(select).first()
+                return result
+            else:
+                return None
+            pass
+
+        def write(self, **kwargs):
+            """."""
+            if self.id:
+                conn = self.database.connect()
+                table = self.table
+                updated = dt.datetime.now()
+                update = (table.update().values(updated=updated, **kwargs).
+                          where(table.c.id == self.id))
+                result = conn.execute(update)
+                return result
+            else:
+                return None
+            pass
+
+        pass
+
     class Null(sa.sql.elements.Null):
         """Represent null data type."""
 
@@ -76,6 +127,10 @@ class Database(pe.Database):
             return 'NULL'
 
         pass
+
+    def record(self, table, id=None):
+        """."""
+        return self.Record(self, table, id=id)
 
     def deploy(self):
         """Deploy application database schema."""
