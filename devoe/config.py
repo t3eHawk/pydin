@@ -103,7 +103,7 @@ class Configurator(dict):
 class Logging():
     """Represents logging configurator used for special loggers."""
 
-    def __init__(self, task=True, step=False, file=False,
+    def __init__(self, task=True, step=True, file=False, sql=False,
                  database=None, schema=None, table=None,  **fields):
         self.metadata = sa.MetaData()
 
@@ -136,7 +136,7 @@ class Logging():
                                   database=database)
 
         if file is True:
-            self.file = self.File(self, table='de_file_history')
+            self.file = self.File(self, table='de_file_log')
         elif file is False:
             self.file = self.File(self, table=None)
         elif isinstance(file, dict):
@@ -147,6 +147,19 @@ class Logging():
             table = None if not isinstance(file, str) else file
             self.file = self.File(self, table=table, schema=schema,
                                   database=database)
+
+        if sql is True:
+            self.sql = self.SQL(self, table='de_sql_log')
+        elif sql is False:
+            self.sql = self.SQL(self, table=None)
+        elif isinstance(sql, dict):
+            self.sql = self.SQL(self, table=sql.get('table'),
+                                schema=sql.get('schema', schema),
+                                database=sql.get('database', database))
+        else:
+            table = None if not isinstance(sql, str) else sql
+            self.sql = self.SQL(self, table=table, schema=schema,
+                                database=database)
         pass
 
     class Task():
@@ -429,6 +442,78 @@ class Logging():
         def setup(self):
             """Configure database logger."""
             logger = pe.logger(f'devoe.file.logger', table=True,
+                               console=False, file=False, email=False)
+            if self.table is None:
+                logger.configure(table=False)
+            else:
+                if not self.database.engine.has_table(self.table):
+                    self.create_table()
+                logger.configure(db={'database': self.database,
+                                     'name': self.table})
+            return logger
+
+        pass
+
+    class SQL():
+        """Represents SQL logger configurator."""
+
+        def __init__(self, logging, database=None, schema=None, table=None):
+            self.logging = logging if isinstance(logging, Logging) else None
+            self.database = database if isinstance(database, str) else None
+            if isinstance(database, Database) is True:
+                self.database = database
+            elif isinstance(database, str):
+                self.database = connector.receive(database)
+            else:
+                module = il.import_module('devoe.db')
+                self.database = module.db
+            self.schema = schema if isinstance(schema, str) else None
+            self.table = table if isinstance(table, str) else None
+            pass
+
+        def create_table(self):
+            """Create database table used for logging."""
+            name = self.table
+            schema = self.schema
+            metadata = self.logging.metadata
+            columns = [sa.Column('id', sa.Integer, sa.Sequence(f'{name}_seq'),
+                                 primary_key=True,
+                                 comment='Unique file ID'),
+                       sa.Column('job_id', sa.Integer,
+                                 comment='Job that processed the file'),
+                       sa.Column('run_id', sa.Integer,
+                                 comment='Run that processed the file'),
+                       sa.Column('task_id', sa.Integer,
+                                 comment='Task that processed the file'),
+                       sa.Column('step_id', sa.Integer,
+                                 comment='Step that processed the file'),
+                       sa.Column('db_name', sa.String(25),
+                                 comment='Database of SQL execution'),
+                       sa.Column('table_name', sa.String(128),
+                                 comment='Name of involved table'),
+                       sa.Column('query_type', sa.String(10),
+                                 comment='Type of SQL being executed'),
+                       sa.Column('query_text', sa.String(10),
+                                 comment='Text of SQL being executed'),
+                       sa.Column('start_date', sa.DateTime,
+                                 comment='Date when SQL execution started'),
+                       sa.Column('end_date', sa.DateTime,
+                                 comment='Date when SQL execution ended'),
+                       sa.Column('output_rows', sa.Integer,
+                                 comment='Total number of returned rows'),
+                       sa.Column('output_text', sa.Integer,
+                                 comment='Returned database message'),
+                       sa.Column('error_code', sa.Integer,
+                                 comment='Occurred database error code'),
+                       sa.Column('error_text', sa.Integer,
+                                 comment='Occurred database error text')]
+            table = sa.Table(name, metadata, *columns, schema=schema)
+            table.create(self.database.engine, checkfirst=True)
+            return table
+
+        def setup(self):
+            """Configure database logger."""
+            logger = pe.logger(f'devoe.sql.logger', table=True,
                                console=False, file=False, email=False)
             if self.table is None:
                 logger.configure(table=False)
