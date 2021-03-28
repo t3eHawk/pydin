@@ -25,8 +25,8 @@ def locate():
     return root
 
 
-def register(object):
-    """Register certain object in memory as a part of application.
+def cache(object):
+    """Save object in application cache.
 
     Parameters
     ----------
@@ -38,9 +38,17 @@ def register(object):
     value : bool
         Always True value indicating that object was successfully stored.
     """
-    cache = imp.import_module('devoe.cache')
-    name = object.__class__.__name__
-    setattr(cache, name, object)
+    namespace = imp.import_module('devoe.cache')
+    name = object.__class__.__name__.lower()
+    setattr(namespace, name, object)
+    return True
+
+
+def declare(object):
+    """."""
+    namespace = imp.import_module('devoe')
+    name = object.__class__.__name__.lower()
+    setattr(namespace, name, object)
     return True
 
 
