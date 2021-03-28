@@ -105,26 +105,31 @@ def to_timestamp(value):
         return int(value.timestamp())
     elif value is None:
         return value
+    pass
 
 
 def to_date(value):
     """Convert initial value to date object."""
     if isinstance(value, str) is True:
         return dt.date.fromisoformat(value)
-    if isinstance(value, dt.date) is True:
+    elif isinstance(value, dt.date) is True:
         return value
-    if value is None:
+    elif value is None:
         return value
+    pass
 
 
 def to_datetime(value):
     """Convert initial value to datetime object."""
-    if isinstance(value, str) is True:
+    if isinstance(value, (int, float)) is True:
+        return dt.datetime.fromtimestamp(to_timestamp(value))
+    elif isinstance(value, str) is True:
         return dt.datetime.fromisoformat(value).replace(microsecond=0)
-    if isinstance(value, dt.datetime) is True:
+    elif isinstance(value, dt.datetime) is True:
         return value.replace(microsecond=0)
-    if value is None:
+    elif value is None:
         return value
+    pass
 
 
 def to_process(exe, file=None, args=None, env=None, devnull=False, spawn=True):
