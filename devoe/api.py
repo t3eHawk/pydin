@@ -1,4 +1,4 @@
-"""Contains global Python API."""
+"""Contains Python API including prototypes and built-in models."""
 
 import configparser
 import ctypes
@@ -12,9 +12,11 @@ import time as tm
 import sqlalchemy as sa
 
 from .config import config
-from .db import db
 from .logger import logger
-from .utils import locate, to_process, to_python
+from .db import db
+
+from .utils import to_process, to_python
+from .utils import locate
 from .wrap import check_repo
 
 
@@ -129,7 +131,7 @@ class Operator():
         logger.debug('Checking scheduler current status...')
         conn = db.connect()
         table = db.tables.components
-        select = table.select().where(table.c.code == 'SHD')
+        select = table.select().where(table.c.id == 'SCHEDULER')
         result = conn.execute(select).first()
         status = True if result.status == 'Y' else False
         if status is False:
@@ -148,22 +150,27 @@ class Operator():
         pass
 
     def create_job(self, name=None, desc=None, mday=None, wday=None,
-                   hour=None, min=None, sec=None, trigger=None,
+                   hour=None, min=None, sec=None, tgid=None,
                    start_date=None, end_date=None, env=None, args=None,
-                   timeout=None, reruns=None, days_rerun=None,
-                   alarm=None, persons=None, debug=None, norepo=False):
+                   timeout=None, maxreruns=None, maxdays=None,
+                   alarm=None, recipients=None, debug=None, norepo=False):
         """Create job with all necessary elements."""
         logger.debug('Creating job...')
         conn = db.connect()
         table = db.tables.schedule
-        values = db.normalize(job_name=name, job_desc=desc, status=False,
+        values = db.normalize(job=name, description=desc, status=False,
                               monthday=mday, weekday=wday,
                               hour=hour, minute=min, second=sec,
-                              trigger_id=trigger,
-                              start_date=start_date, end_date=end_date,
-                              environment=env, arguments=args, timeout=timeout,
-                              reruns=reruns, days_rerun=days_rerun,
-                              alarm=alarm, persons=persons, debug=debug)
+                              trigger_id=tgid,
+                              start_date=start_date,
+                              end_date=end_date,
+                              environment=env, arguments=args,
+                              timeout=timeout,
+                              maxreruns=maxreruns,
+                              maxdays=maxdays,
+                              alarm=alarm,
+                              recipients=recipients,
+                              debug=debug)
         logger.debug(f'Configuring schedule record with {values=}')
         insert = table.insert().values(**values)
         id = conn.execute(insert).inserted_primary_key[0]
@@ -219,23 +226,28 @@ class Operator():
         return id
 
     def configure_job(self, id, name=None, desc=None, mday=None, wday=None,
-                      hour=None, min=None, sec=None, trigger=None,
+                      hour=None, min=None, sec=None, tgid=None,
                       start_date=None, end_date=None, env=None, args=None,
-                      timeout=None, reruns=None, days_rerun=None,
-                      alarm=None, persons=None, debug=None):
+                      timeout=None, maxreruns=None, maxdays=None,
+                      alarm=None, recipients=None, debug=None):
         """Modify job configuration."""
         repr = f'Job[{id}]'
         logger.debug(f'Editing {repr}...')
         conn = db.connect()
         table = db.tables.schedule
-        values = db.normalize(job_name=name, job_desc=desc,
+        values = db.normalize(job=name, description=desc,
                               monthday=mday, weekday=wday,
                               hour=hour, minute=min, second=sec,
-                              trigger_id=trigger,
-                              start_date=start_date, end_date=end_date,
-                              environment=env, arguments=args, timeout=timeout,
-                              reruns=reruns, days_rerun=days_rerun,
-                              alarm=alarm, persons=persons, debug=debug)
+                              trigger_id=tgid,
+                              start_date=start_date,
+                              end_date=end_date,
+                              environment=env, arguments=args,
+                              timeout=timeout,
+                              maxreruns=maxreruns,
+                              maxdays=maxdays,
+                              alarm=alarm,
+                              recipients=recipients,
+                              debug=debug)
         if len(values) > 0:
             logger.debug(f'Configuring schedule record with {values=}')
             update = table.update().values(**values).where(table.c.id == id)
@@ -309,8 +321,8 @@ class Operator():
         logger.debug('Jobs listed')
         pass
 
-    def run_job(self, id, date=None, run=None, trigger=None, wait=True,
-                debug=None, noalarm=None, solo=None):
+    def run_job(self, id, tag=None, date=None, record_id=None, trigger_id=None,
+                wait=True, debug=None, noalarm=None, solo=None):
         """Run particular job."""
         repr = f'Job[{id}]'
         logger.debug(f'Requested to run {repr}')
@@ -323,8 +335,10 @@ class Operator():
         exe = config['ENVIRONMENTS'].get(env)
         file = os.path.join(self.root, f'jobs/{id}/job.py')
         args += ' run'
-        args_dict = {'date': date.isoformat() if date is not None else None,
-                     'run': run, 'trigger': trigger,
+        args_dict = {'tag': tag,
+                     'date': date.isoformat() if date is not None else None,
+                     'record': record_id,
+                     'trigger': trigger_id,
                      'debug': '' if debug is True else None,
                      'noalarm': '' if noalarm is False else None,
                      'solo': '' if solo is True else None}

@@ -244,8 +244,8 @@ class Manager():
         print(head)
         for job in jobs:
             id = job['id']
-            name = job['job_name'] or ''
-            desc = job['job_desc'] or ''
+            name = job['job'] or ''
+            desc = job['description'] or ''
             status = job['status'] or ''
             print(border)
             print(row.format(id=id, name=name, desc=desc, status=status))
@@ -257,12 +257,12 @@ class Manager():
         id = self._check_id(id)
         repr = f'Job[{id}]'
         ln = len(args)
-        keys = ('run', 'date', 'trigger')
+        keys = ('tag', 'date', 'record_id', 'trigger_id')
         key = args[0] if ln > 1 and args[0] in keys else None
         value = args[1] if ln > 1 and key is not None else None
         kwargs = {}
         if key is not None and value is not None:
-            if key in ('run', 'trigger'):
+            if key in ('tag', 'record_id', 'trigger_id'):
                 value = int(value)
             elif key == 'date':
                 value = dt.datetime.fromisoformat(value)
@@ -273,16 +273,18 @@ class Manager():
 
         if key is None:
             print(f'You are trying to start {repr} for current date...')
-        elif key == 'run':
-            print(f'You are trying to start {repr} as Run[{value}]...')
+        elif key == 'tag':
+            print(f'You are trying to start {repr} using timestamp {value}...')
         elif key == 'date':
-            print(f'You are trying to start {repr} for date {value}...')
-        elif key == 'trigger':
-            print(f'You are trying to trigger {repr} from Run[{value}]...')
+            print(f'You are trying to start {repr} using date {value}...')
+        elif key == 'record_id':
+            print(f'You are trying to start {repr} as Run[{value}]...')
+        elif key == 'trigger_id':
+            print(f'You are trying to trig {repr} from Run[{value}]...')
         sure = self.sure
         if sure is False:
             while True:
-                sure = input(f'Are you sure? [Y/n] ')
+                sure = input('Are you sure? [Y/n] ')
                 if sure in ('Y', 'n'):
                     sure = True if sure == 'Y' else False
                     break
@@ -464,9 +466,9 @@ class Manager():
         hour = input('Hour [0-23] ======= ') or None
         min = input('Minute [0-59] ===== ') or None
         sec = input('Second [0-59] ===== ') or None
-        trigger = input('Trigger [1...n] === ')
-        trigger = int(trigger) if trigger.isdigit() is True else None
-        trigger = db.null if trigger == 0 else trigger
+        tgid = input('Triggering JID [1...n] === ')
+        tgid = int(tgid) if tgid.isdigit() is True else None
+        tgid = db.null if tgid == 0 else tgid
         print()
         start_date = input('Start date [YYYY-MM-DD HH24:MI:SS] ') or None
         start_date = db.null if start_date == '-' else None
@@ -476,26 +478,34 @@ class Manager():
         timeout = input('Set timeout [1...n] ')
         timeout = int(timeout) if timeout.isdigit() is True else None
         timeout = db.null if timeout == 0 else timeout
-        reruns = input('Limit of reruns number [1...n] ')
-        reruns = int(reruns) if reruns.isdigit() is True else None
-        reruns = db.null if reruns == 0 else reruns
-        days_rerun = input('Limit of days in rerun [1...n] ')
-        days_rerun = int(days_rerun) if days_rerun.isdigit() is True else None
-        days_rerun = db.null if days_rerun == 0 else days_rerun
+        maxreruns = input('Limit of reruns number [1...n] ')
+        maxreruns = int(maxreruns) if maxreruns.isdigit() is True else None
+        maxreruns = db.null if maxreruns == 0 else maxreruns
+        maxdays = input('Limit of days in maintenance [1...n] ')
+        maxdays = int(maxdays) if maxdays.isdigit() is True else None
+        maxdays = db.null if maxdays == 0 else maxdays
         print()
         alarm = input('Enable alarming for this job [Y] ')
         alarm = True if alarm == 'Y' else None
-        persons = input('List notification email addresses [a,b,...]: ')
+        recipients = input('List notification email addresses [a,b,...]: ')
         pattern = r'([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)'
-        persons = ','.join(re.findall(pattern, persons)) or None
-        result = {'name': name, 'desc': desc, 'env': env,
-                  'mday': mday, 'wday': wday,
-                  'hour': hour, 'sec': sec, 'min': min,
-                  'trigger': trigger,
-                  'start_date': start_date, 'end_date': end_date,
+        recipients = ','.join(re.findall(pattern, recipients)) or None
+        result = {'name': name,
+                  'desc': desc,
+                  'env': env,
+                  'mday': mday,
+                  'wday': wday,
+                  'hour': hour,
+                  'min': min,
+                  'sec': sec,
+                  'tgid': tgid,
+                  'start_date': start_date,
+                  'end_date': end_date,
                   'timeout': timeout,
-                  'reruns': reruns, 'days_rerun': days_rerun,
-                  'alarm': alarm, 'persons': persons}
+                  'maxreruns': maxreruns,
+                  'maxdays': maxdays,
+                  'alarm': alarm,
+                  'recipients': recipients}
         print()
         return result
 

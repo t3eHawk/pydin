@@ -6,7 +6,9 @@ import ctypes
 import datetime as dt
 import importlib as il
 import importlib.util as ilu
+import json
 import os
+import pickle
 import platform
 import re
 import signal
@@ -15,6 +17,7 @@ import sys
 import threading as th
 import time as tm
 import traceback as tb
+import types
 import queue
 
 import pepperoni as pe
@@ -89,7 +92,7 @@ class Scheduler():
         """Check whether scheduler running or not."""
         conn = db.connect()
         table = db.tables.components
-        select = table.select().where(table.c.code == 'SHD')
+        select = table.select().where(table.c.id == 'SCHEDULER')
         result = conn.execute(select).first()
         status = True if result.status == 'Y' else False
         return status
@@ -156,7 +159,7 @@ class Scheduler():
         logger.debug('Killing the scheduler...')
         conn = db.connect()
         table = db.tables.components
-        select = table.select().where(table.c.code == 'SHD')
+        select = table.select().where(table.c.id == 'SCHEDULER')
         result = conn.execute(select).first()
         pid = result.pid
         logger.debug(f'Scheduler should be on PID[{pid}]')
@@ -261,7 +264,7 @@ class Scheduler():
                        'hour': row.hour,
                        'min': row.minute,
                        'sec': row.second,
-                       'trigger': row.trigger_id,
+                       'tgid': row.trigger_id,
                        'start': to_timestamp(row.start_date),
                        'end': to_timestamp(row.end_date),
                        'env': row.environment,
@@ -283,7 +286,7 @@ class Scheduler():
             try:
                 if (
                     job['status'] is True
-                    and job['trigger'] is None
+                    and job['tgid'] is None
                     and self._check(job['mday'], now.tm_mday) is True
                     and self._check(job['wday'], now.tm_wday+1) is True
                     and self._check(job['hour'], now.tm_hour) is True
@@ -303,11 +306,11 @@ class Scheduler():
         try:
             h = db.tables.run_history
             s = db.tables.schedule
-            select = (sa.select([h.c.id, h.c.job_id, h.c.job_date,
+            select = (sa.select([h.c.id, h.c.job_id, h.c.run_tag,
                                  h.c.added, h.c.rerun_times,
                                  s.c.status, s.c.start_date, s.c.end_date,
                                  s.c.environment, s.c.arguments,
-                                 s.c.timeout, s.c.reruns, s.c.days_rerun]).
+                                 s.c.timeout, s.c.maxreruns, s.c.maxdays]).
                       select_from(sa.join(h, s, h.c.job_id == s.c.id)).
                       where(sa.and_(h.c.status.in_(['E', 'T']),
                                     h.c.rerun_id.is_(None),
@@ -321,21 +324,21 @@ class Scheduler():
             for row in result:
                 try:
                     id = row.job_id
-                    moment = to_timestamp(row.job_date)
-                    repr = f'Job[{id}:{moment}]'
+                    tag = row.run_tag
+                    repr = f'Job[{id}:{tag}]'
                     status = True if row.status == 'Y' else False
                     start_date = to_timestamp(row.start_date)
                     end_date = to_timestamp(row.end_date)
                     added = to_datetime(row.added)
-                    reruns = coalesce(row.reruns, 0)
+                    maxreruns = coalesce(row.maxreruns, 0)
+                    maxdays = coalesce(row.maxdays, 0)
                     rerun_times = coalesce(row.rerun_times, 0)
-                    days_rerun = coalesce(row.days_rerun, 0)
-                    date_from = now-dt.timedelta(days=days_rerun)
+                    date_from = now-dt.timedelta(days=maxdays)
                     if (
                         status is True
-                        and (start_date is None or start_date < self.moment)
-                        and (end_date is None or end_date > self.moment)
-                        and rerun_times < reruns
+                        and (start_date is None or start_date < self.tag)
+                        and (end_date is None or end_date > self.tag)
+                        and rerun_times < maxreruns
                         and added > date_from
                         and added < date_to
                     ):
@@ -343,10 +346,10 @@ class Scheduler():
                                'env': row.environment,
                                'args': row.arguments,
                                'timeout': row.timeout,
-                               'run': row.id}
+                               'record_id': row.id}
                         logger.debug(f'Job will be sent for rerun {job}')
                         logger.info(f'Adding {repr} to the queue for rerun...')
-                        self.queue.put((job, moment))
+                        self.queue.put((job, tag))
                         logger.info(f'{repr} added to the queue for rerun')
                 except Exception:
                     logger.error()
@@ -399,7 +402,8 @@ class Scheduler():
         # Add job to the execution queue.
         try:
             id = job['id']
-            date = dt.datetime.fromtimestamp(moment)
+            tag = moment
+            date = dt.datetime.fromtimestamp(tag)
             repr = f'Job[{id}:{moment}]'
             logger.info(f'Adding {repr} to the queue...')
             logger.debug(f'Creating new run history record for {repr}...')
@@ -407,20 +411,21 @@ class Scheduler():
             table = db.tables.run_history
             insert = (table.insert().
                       values(job_id=id,
-                             job_date=date,
+                             run_tag=tag,
+                             run_date=date,
                              added=dt.datetime.now(),
                              status='Q',
                              server=self.server,
                              user=self.user))
             result = conn.execute(insert)
             src = job.copy()
-            run = result.inserted_primary_key[0]
+            record_id = result.inserted_primary_key[0]
             job = {'id': src['id'],
                    'env': src['env'],
                    'args': src['args'],
                    'timeout': src['timeout'],
-                   'run': run}
-            logger.debug(f'Created run history record {run} for {repr}')
+                   'record_id': record_id}
+            logger.debug(f'Created run history record {record_id} for {repr}')
             self.queue.put((job, moment))
         except Exception:
             logger.error()
@@ -448,12 +453,12 @@ class Scheduler():
             env = job['env'] or 'python'
             args = job['args'] or ''
             timeout = job['timeout']
-            run = job['run']
+            record_id = job['record_id']
             repr = f'Job[{id}:{moment}]'
             logger.info(f'Initiating {repr}...')
             exe = config['ENVIRONMENTS'].get(env)
-            file = os.path.join(self.root, f'jobs/{id}/job.py')
-            args += f' run -a --run {run}'
+            file = os.path.join(self.path, f'jobs/{id}/job.py')
+            args += f' run -a --record {record_id}'
             proc = to_process(exe, file, args)
             logger.info(f'{repr} runs on PID {proc.pid}')
             logger.debug(f'Waiting for {repr} to finish...')
@@ -467,7 +472,7 @@ class Scheduler():
                 table = db.tables.run_history
                 update = (table.update().
                           values(status='T').
-                          where(table.c.id == run))
+                          where(table.c.id == record_id))
                 conn.execute(update)
             except Exception:
                 logger.error()
@@ -483,7 +488,7 @@ class Scheduler():
                     update = (table.update().
                               values(status='E',
                                      text_error=proc.stderr.read().decode()).
-                              where(table.c.id == run))
+                              where(table.c.id == record_id))
                     conn.execute(update)
                 except Exception:
                     logger.error()
@@ -538,7 +543,7 @@ class Scheduler():
         logger.debug('Updating this component information...')
         conn = db.connect()
         table = db.tables.components
-        update = table.update().where(table.c.code == 'SHD')
+        update = table.update().where(table.c.id == 'SCHEDULER')
         if self.status is True:
             update = update.values(status='Y',
                                    start_date=self.start_date,
@@ -557,11 +562,9 @@ class Scheduler():
 class Job():
     """Represents single application job."""
 
-    def __init__(self, id=None, name=None, desc=None, date=None, run=None,
-                 persons=None, alarm=None, solo=None, debug=None):
-        self.root = locate()
-        self._registered = register(self)
-
+    def __init__(self, id=None, name=None, desc=None, tag=None, date=None,
+                 record_id=None, trigger_id=None, recipients=None,
+                 alarm=None, debug=None, solo=None):
         self.conn = db.connect()
         self.logger = logger
 
@@ -569,28 +572,57 @@ class Job():
         if isinstance(self.id, int) is False or self.id is None:
             raise ValueError(f'id must be int, not {id.__class__.__name__}')
 
+        self.id = id
         schedule = self._parse_schedule()
         args = self._parse_arguments()
         sysinfo = pe.sysinfo()
 
         self.name = name or schedule['name']
         self.desc = desc or schedule['desc']
-        self.date = to_datetime(args.date or date)
-        self.run_id = args.run or run
-        self.trigger_id = args.trigger
-        self.source_id = None
-        self.seqno = None
+
+        self.mode = 'A' if args.auto is True else 'M'
+        self.tag = args.tag or tag
+        self.date = args.date or date
 
         self.added = None
         self.updated = None
         self.start_date = None
         self.end_date = None
         self.status = None
-        self.duration = None
+        # self.data = dict()
+        self.data = types.SimpleNamespace()
+        self.errors = set()
 
-        self.server = platform.node()
-        self.user = os.getlogin()
-        self.pid = os.getpid()
+        table = db.tables.run_history
+        self.record_id = args.record or record_id
+        self.record = db.record(table, self.record_id)
+        self.reruns = None
+        self.seqno = None
+
+        self.trigger_id = args.trigger or trigger_id
+        self.trigger = db.record(table, self.trigger_id)
+
+        self.initiator_id = None
+        self.initiator = db.record(table, self.initiator_id)
+
+        if self.record_id:
+            result = self.record.read()
+            if result and self.id == result.job_id:
+                self.tag = result.run_tag
+                self.date = result.run_date
+                self.added = result.added
+                self.updated = result.updated
+                self.start_date = result.start_date
+                self.end_date = result.end_date
+                self.status = result.status
+                if result.data_dump:
+                    self.data = pickle.loads(result.data_dump)
+
+                self.reruns = result.rerun_times
+                self.seqno = result.rerun_seqno
+            else:
+                message = f'no such {self} having run[{self.record_id}]'
+                raise ValueError(message)
 
         # Configure dependent objects.
         self.persons = self._parse_persons(persons or schedule['persons'])
@@ -601,7 +633,6 @@ class Job():
                          smtp={'recipients': self.persons})
 
         self.file_log = self._parse_file_log()
-        self.text_error = None
         self.text_log = None
 
         self.__solo = args.solo
@@ -620,10 +651,111 @@ class Job():
 
     def __repr__(self):
         """Represent this job as its ID and timestamp."""
-        if self.date is None:
+        if self.tag is None:
             return f'Job[{self.id}]'
-        elif self.date is not None:
-            return f'Job[{self.id}:{to_timestamp(self.date)}]'
+        elif self.tag is not None:
+            return f'Job[{self.id}:{self.tag}]'
+        pass
+
+    @property
+    def id(self):
+        """."""
+        if hasattr(self, '_id'):
+            return self._id
+        pass
+
+    @id.setter
+    def id(self, value):
+        if self.id is None:
+            value = coalesce(value, self._recognize())
+            if isinstance(value, int):
+                self._id = value
+            else:
+                message = f'id must be int, not {value.__class__.__name__}'
+                raise ValueError(message)
+        else:
+            message = 'id cannot be redefined'
+            raise AttributeError(message)
+        pass
+
+    @property
+    def tag(self):
+        """."""
+        if hasattr(self, '_tag'):
+            return self._tag
+        pass
+
+    @tag.setter
+    def tag(self, value):
+        if isinstance(value, (int, float)):
+            self._tag = to_timestamp(value)
+            self._date = to_datetime(value)
+        elif value is None:
+            self._tag = None
+            self._date = None
+        else:
+            type = value.__class__.__name__
+            message = f'tag must be int or float, not {type}'
+            raise ValueError(message)
+        pass
+
+    @property
+    def date(self):
+        """."""
+        if hasattr(self, '_date'):
+            return self._date
+        pass
+
+    @date.setter
+    def date(self, value):
+        if self.tag is None:
+            if isinstance(value, (str, dt.datetime)):
+                self.tag = to_timestamp(self.date)
+            elif value is None:
+                self.tag = None
+            else:
+                type = value.__class__.__name__
+                message = f'date must be str or datetime, not {type}'
+                raise ValueError(message)
+        pass
+
+    @property
+    def record_id(self):
+        """."""
+        return self._record_id
+
+    @record_id.setter
+    def record_id(self, value):
+        if value is None or isinstance(value, int):
+            self._record_id = value
+        else:
+            message = f'run ID must be int, not {value.__class__.__name__}'
+            raise TypeError(message)
+        pass
+
+    @property
+    def duration(self):
+        """."""
+        return self.end_date-self.start_date
+
+    @property
+    def text_parameters(self):
+        """."""
+        if self.data:
+            return json.dumps(self.data, sort_keys=True)
+        else:
+            return None
+        pass
+
+    @property
+    def text_error(self):
+        """Get textual exception from the last registered error."""
+        if self.errors:
+            err_type, err_value, err_tb = list(self.errors)[-1]
+            return ''.join(tb.format_exception(err_type, err_value, err_tb))
+        else:
+            return None
+        pass
 
     def run(self):
         """Run this particular job."""
@@ -653,61 +785,97 @@ class Job():
 
     def _start(self):
         logger.info(f'{self} starts...')
-        self.start_date = dt.datetime.now()
-        self.status = 'S'
-        if self.run_id is None:
-            logger.debug(f'{self} will run as totally new')
-            self.date = to_datetime(self.date or dt.datetime.now())
-            self.run_id = self._new()
-            logger.info(f'{self} started as Run[{self.run_id}] '
-                        f'for date[{self.date}]')
-        elif isinstance(self.run_id, int) is True:
-            logger.debug(f'{self} declared with Run[{self.run_id}]')
-            conn = db.connect()
-            table = db.tables.run_history
-            select = table.select().where(table.c.id == self.run_id)
-            result = conn.execute(select).first()
-            if result is None:
-                raise ValueError(f'Run[{self.run_id}] was not found')
-            elif self.id != result.job_id:
-                raise ValueError(f'Run[{self.run_id}] '
-                                 f'was for Job[{result.job_id}], '
-                                 f'not Job[{self.id}]')
-            elif result.status == 'R':
-                raise ValueError(f'Run[{self.run_id}] is not finished yet')
-            elif result.status in ('Q', 'S'):
-                logger.debug(f'This run has normal status {result.status} '
-                             f'so {self} will just continue with it')
-                self.date = to_datetime(result.job_date)
-                self.updated = self._update(start_date=self.start_date,
-                                            status=self.status,
-                                            pid=self.pid,
-                                            file_log=self.file_log)
-                logger.info(f'{self} started as Run[{self.run_id}] '
-                            f'for date[{self.date}]')
-            elif result.status in ('D', 'E', 'C', 'T'):
-                logger.debug(f'This run already has status {result.status} '
-                             f'so {self} will be executed as rerun')
-                self.date = to_datetime(result.job_date)
-                self.source_id = self.run_id
-                self.seqno = (result.rerun_times or 0)+1
-                logger.debug(f'This should be {self.seqno}-th rerun of {self}')
-                self.run_id = self._new()
-                self.updated = self._update_source(rerun_now='Y')
-                logger.info(f'{self} is {self.seqno}-th rerun of '
-                            f'initial Run[{self.source_id}]')
-                logger.info(f'{self} started as Run[{self.run_id}] '
-                            f'for date[{self.date}]')
+        if self.record_id is None:
+            self.tag = self.tag or tm.time()
+            self.start_date = dt.datetime.now()
+            self.status = 'S'
+            self._start_as_new()
         else:
-            raise TypeError('run ID must be int, '
-                            f'not {self.run_id.__class__.__name__}')
+            logger.debug(f'{self} declared as run[{self.record_id}]')
+            if self.status == 'Q':
+                self.start_date = dt.datetime.now()
+                self.status = 'S'
+                self._start_as_continue()
+            elif self.status == 'S':
+                message = f'{self} run[{self.record_id}] already starting'
+                raise ValueError(message)
+            elif self.status == 'R':
+                message = f'{self} run[{self.record_id}] already running'
+                raise ValueError(message)
+            elif self.status in ('D', 'E', 'C', 'T'):
+                self.added = dt.datetime.now()
+                self.start_date = dt.datetime.now()
+                self.end_date = None
+                self.status = 'S'
+                self.seqno = (self.reruns or 0)+1
+                self.reruns = None
+                self.initiator_id = self.initiator.select(self.record_id)
+                self._start_as_rerun()
         logger.debug(f'{self} started')
+        pass
+
+    def _start_as_new(self):
+        logger.debug(f'{self} will be executed as totally new')
+        self.record_id = self.record.create()
+        self.record.write(job_id=self.id,
+                          run_mode=self.mode,
+                          run_tag=self.tag,
+                          run_date=self.date,
+                          added=self.start_date,
+                          start_date=self.start_date,
+                          status=self.status,
+                          trigger_id=self.trigger_id,
+                          rerun_id=self.initiator_id,
+                          rerun_seqno=self.seqno,
+                          server=self.server,
+                          user=self.user,
+                          pid=self.pid,
+                          file_log=self.file_log)
+        logger.info(f'{self} started as run[{self.record_id}] '
+                    f'for date[{self.date}] using tag[{self.tag}]')
+        pass
+
+    def _start_as_continue(self):
+        logger.debug(f'{self} will be executed as continue')
+        self.record.write(run_mode=self.mode,
+                          start_date=self.start_date,
+                          status=self.status,
+                          server=self.server,
+                          user=self.user,
+                          pid=self.pid,
+                          file_log=self.file_log)
+        logger.info(f'{self} started as run[{self.record_id}] '
+                    f'for date[{self.date}] using tag[{self.tag}]')
+        pass
+
+    def _start_as_rerun(self):
+        logger.debug(f'{self} will be executed as rerun')
+        logger.info(f'{self} {self.seqno}-th rerun initiated '
+                    f'from run[{self.initiator_id}]')
+        self.record_id = self.record.create()
+        self.record.write(job_id=self.id,
+                          run_mode=self.mode,
+                          run_tag=self.tag,
+                          run_date=self.date,
+                          added=self.start_date,
+                          start_date=self.start_date,
+                          status=self.status,
+                          trigger_id=self.trigger_id,
+                          rerun_id=self.initiator_id,
+                          rerun_seqno=self.seqno,
+                          server=self.server,
+                          user=self.user,
+                          pid=self.pid,
+                          file_log=self.file_log)
+        self.initiator.write(rerun_now='Y')
+        logger.info(f'{self} started as run[{self.record_id}] '
+                    f'for date[{self.date}] using tag[{self.tag}]')
         pass
 
     def _run(self):
         logger.info(f'{self} runs...')
         self.status = 'R'
-        self.updated = self._update(status=self.status)
+        self.record.write(status=self.status)
         name = 'script'
         file = f'{self.root}/script.py'
         logger.debug(f'{self} script {file=} now will be executed')
@@ -720,64 +888,16 @@ class Job():
     def _end(self):
         logger.info(f'{self} ends...')
         self.end_date = dt.datetime.now()
-        self.updated = self._update(end_date=self.end_date,
-                                    status=self.status,
-                                    text_error=self.text_error)
-        if self.source_id is not None:
-            rerun_now = None
+        self.record.write(end_date=self.end_date, status=self.status,
+                          text_error=self.text_error,
+                          data_dump=pickle.dumps(self.data))
+        if self.initiator_id:
             rerun_done = 'Y' if self.status == 'D' else None
-            self.updated = self._update_source(rerun_times=self.seqno,
-                                               rerun_now=rerun_now,
-                                               rerun_done=rerun_done)
-        self.duration = self.end_date-self.start_date
+            self.initiator.write(rerun_times=self.seqno,
+                                 rerun_now=None, rerun_done=rerun_done)
         logger.debug(f'{self} ended')
         logger.info(f'{self} duration {self.duration.seconds} seconds')
         pass
-
-    def _new(self):
-        logger.debug(f'New run history record will be created for {self}')
-        conn = db.connect()
-        table = db.tables.run_history
-        insert = (table.insert().
-                  values(job_id=self.id,
-                         job_date=self.date,
-                         added=self.start_date,
-                         start_date=self.start_date,
-                         status=self.status,
-                         server=self.server,
-                         pid=self.pid,
-                         user=self.user,
-                         trigger_id=self.trigger_id,
-                         rerun_id=self.source_id,
-                         rerun_seqno=self.seqno,
-                         file_log=self.file_log))
-        id = conn.execute(insert).inserted_primary_key[0]
-        logger.debug(f'Created Run[{id}] history record for {self}')
-        return id
-
-    def _update(self, **kwargs):
-        logger.debug(f'Updating Run[{self.run_id}] history record '
-                     f'with following values {kwargs}')
-        conn = db.connect()
-        table = db.tables.run_history
-        updated = dt.datetime.now()
-        update = (table.update().values(updated=self.updated, **kwargs).
-                  where(table.c.id == self.run_id))
-        conn.execute(update)
-        logger.debug(f'Run[{self.run_id}] history record updated')
-        return updated
-
-    def _update_source(self, **kwargs):
-        logger.debug(f'Updating source Run[{self.source_id}] history record '
-                     f'with following values {kwargs}')
-        conn = db.connect()
-        table = db.tables.run_history
-        updated = dt.datetime.now()
-        update = (table.update().values(updated=updated, **kwargs).
-                  where(table.c.id == self.source_id))
-        conn.execute(update)
-        logger.debug(f'Source Run[{self.source_id}] history record updated')
-        return updated
 
     def _done(self):
         if logger.with_error is True:
@@ -799,20 +919,9 @@ class Job():
     def _cancel(self):
         logger.info(f'Canceling {self}...')
         self.status = 'C'
-        conn = db.connect()
-        table = db.tables.run_history
-        update = (table.update().
-                  values(updated=self.updated,
-                         status=self.status).
-                  where(table.c.id == self.run_id))
-        conn.execute(update)
-        if self.source_id is not None:
-            update = (table.update().
-                      values(updated=self.updated,
-                             rerun_times=self.seqno,
-                             rerun_now=None).
-                      where(table.c.id == self.source_id))
-            conn.execute(update)
+        self.record.write(status=self.status)
+        if self.initiator_id:
+            self.initiator.write(rerun_times=self.seqno, rerun_now=None)
         logger.info(f'{self} canceled')
         pass
 
@@ -829,15 +938,14 @@ class Job():
         return id
 
     def _parse_schedule(self):
-        conn = db.connect()
         table = db.tables.schedule
-        select = table.select().where(table.c.id == self.id)
-        result = conn.execute(select).first()
-        schedule = {'name': result.job_name,
-                    'desc': result.job_desc,
+        record = db.record(table, self.id)
+        result = record.read()
+        schedule = {'name': result.job,
+                    'desc': result.description,
                     'debug': True if result.debug == 'Y' else False,
                     'alarm': True if result.alarm == 'Y' else False,
-                    'persons': result.persons}
+                    'recipients': result.recipients}
         return schedule
 
     def _parse_arguments(self):
@@ -848,15 +956,17 @@ class Job():
                             required=False, help='enable debug mode')
         parser.add_argument('--id', type=int,
                             required=False, help='job unique ID')
+        parser.add_argument('--tag', type=int,
+                            required=False, help='job run timestamp')
         parser.add_argument('--date', type=dt.datetime.fromisoformat,
-                            required=False, help='job date in ISO format')
-        parser.add_argument('--run', type=int,
-                            required=False, help='job run history ID')
+                            required=False, help='job run date in ISO format')
+        parser.add_argument('--record', type=int,
+                            required=False, help='job run ID')
         parser.add_argument('--trigger', type=int,
-                            required=False, help='trigger history ID')
+                            required=False, help='trigger ID')
         parser.add_argument('--solo', action='store_true',
                             required=False, help='do not trigger other jobs')
-        parser.add_argument('--noalarm', action='store_false', default=None,
+        parser.add_argument('--mute', action='store_false', default=None,
                             required=False, help='disable alarming')
         args, anons = parser.parse_known_args()
         return args
@@ -925,10 +1035,10 @@ class Job():
                         args = row.arguments or ''
 
                         exe = config['ENVIRONMENTS'].get(env)
-                        file = os.path.abspath(f'{self.root}/../{id}/job.py')
-                        date = self.date.isoformat()
-                        trigger = self.run_id
-                        args += f' run -a --date {date} --trigger {trigger}'
+                        file = os.path.abspath(f'{self.path}/../{id}/job.py')
+                        tag = self.tag
+                        trigger_id = self.record_id
+                        args += f' run -a --tag {tag} --trigger {trigger_id}'
                         proc = to_process(exe, file, args=args)
                         logger.info(f'{repr} runs on PID {proc.pid}')
                     except Exception:

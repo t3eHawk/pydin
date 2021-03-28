@@ -137,18 +137,18 @@ class Database(pe.Database):
         raise NotImplementedError
         pass
 
-    def normalize(self, job_name=None, job_desc=None, status=None,
+    def normalize(self, job=None, description=None, status=None,
                   monthday=None, weekday=None,
                   hour=None, minute=None, second=None, trigger_id=None,
                   start_date=None, end_date=None,
                   environment=None, arguments=None, timeout=None,
-                  reruns=None, days_rerun=None,
-                  alarm=None, persons=None, debug=None):
+                  maxreruns=None, maxdays=None,
+                  alarm=None, recipients=None, debug=None):
         """Normalize parameters in accordance with their data types."""
         values = {}
-        setup = [{'column': 'job_name', 'value': job_name,
+        setup = [{'column': 'job', 'value': job,
                   'types': (str,)},
-                 {'column': 'job_desc', 'value': job_desc,
+                 {'column': 'description', 'value': description,
                   'types': (str,)},
                  {'column': 'status', 'value': status,
                   'types': (bool, ),
@@ -175,14 +175,14 @@ class Database(pe.Database):
                   'types': (str,)},
                  {'column': 'timeout', 'value': timeout,
                   'types': (int,)},
-                 {'column': 'reruns', 'value': reruns,
+                 {'column': 'maxreruns', 'value': maxreruns,
                   'types': (int,)},
-                 {'column': 'days_rerun', 'value': days_rerun,
+                 {'column': 'maxdays', 'value': maxdays,
                   'types': (int,)},
                  {'column': 'alarm', 'value': alarm,
                   'types': (bool,),
                   'norm_func': lambda arg: 'Y' if arg is True else self.null},
-                 {'column': 'persons', 'value': persons,
+                 {'column': 'recipients', 'value': recipients,
                   'types': (str,)},
                  {'column': 'debug', 'value': debug,
                   'types': (bool,),
