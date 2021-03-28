@@ -70,6 +70,19 @@ def coalesce(*args):
             return arg
 
 
+def to_integer(value):
+    """."""
+    if isinstance(value, int):
+        return value
+    elif isinstance(value, float):
+        return int(value)
+    elif isinstance(value, str) and value.isdigit():
+        return int(value)
+    elif value is None:
+        return value
+    pass
+
+
 def to_timestamp(value):
     """Convert initial value to timestamp.
 
