@@ -19,7 +19,6 @@ filename = 'devoe.ini'
 user_config = os.path.abspath(os.path.expanduser(f'~/.devoe/{filename}'))
 home_config = os.path.join(home, filename) if home is not None else None
 local_config = os.path.join(os.path.dirname(sys.argv[0]), filename)
-index_config = os.path.abspath(os.path.expanduser(f'~/.devoe/index.ini'))
 
 
 class Configurator(dict):
@@ -672,6 +671,7 @@ class Connector(dict):
 
     def __init__(self):
         super().__init__()
+        self.config = os.path.abspath(os.path.expanduser('~/.devoe/index.ini'))
         pass
 
     class Connection():
@@ -709,7 +709,7 @@ class Connector(dict):
 
     def load(self, path=None, encoding=None):
         """Load configuration from file."""
-        path = path or index_config
+        path = path or self.config
         parser = configparser.ConfigParser(allow_no_value=True)
         parser.read(path, encoding=encoding)
         for section in parser.sections():
@@ -743,7 +743,7 @@ class Connector(dict):
                 try:
                     options = self[name]
                 except KeyError as error:
-                    path = index_config
+                    path = self.config
                     message = f'no record named <{name}> found, check {path}'
                     traceback = error.__traceback__
                     raise Exception(message).with_traceback(traceback)
@@ -918,7 +918,7 @@ class Calendar():
             """Get end of current date."""
             return self._now.replace(hour=23, minute=59, second=59)
 
-    pass
+        pass
 
     class Today(Day):
         """Represents current day."""
