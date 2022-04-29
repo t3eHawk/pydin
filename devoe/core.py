@@ -28,7 +28,8 @@ from .config import Logging
 from .logger import logger
 from .db import db
 
-from .utils import locate, register
+from .utils import locate
+from .utils import cache, declare
 from .utils import coalesce
 from .utils import to_datetime, to_timestamp
 from .utils import to_process, to_python
@@ -38,7 +39,7 @@ class Scheduler():
     """Represents application scheduler."""
 
     def __init__(self, name=None, desc=None, owner=None):
-        self.root = locate()
+        self.path = locate()
 
         self.conn = db.connect()
         self.logger = logger
@@ -566,11 +567,9 @@ class Job():
                  record_id=None, trigger_id=None, recipients=None,
                  alarm=None, debug=None, solo=None):
         self.conn = db.connect()
-        self.logger = logger
-
-        self.id = coalesce(id, self._recognize())
-        if isinstance(self.id, int) is False or self.id is None:
-            raise ValueError(f'id must be int, not {id.__class__.__name__}')
+        self.path = locate()
+        self.cached = cache(self)
+        self.declared = declare(self)
 
         self.id = id
         schedule = self._parse_schedule()
@@ -755,6 +754,23 @@ class Job():
             return ''.join(tb.format_exception(err_type, err_value, err_tb))
         else:
             return None
+        pass
+
+    @classmethod
+    def get(cls):
+        """Get existing job from current execution."""
+        cache = imp.import_module('devoe.cache')
+        object = getattr(cache, cls.__name__.lower())
+        return object
+
+    @classmethod
+    def exists(cls):
+        """Check if job exists in current execution."""
+        cache = imp.import_module('devoe.cache')
+        if hasattr(cache, cls.__name__.lower()):
+            return True
+        else:
+            return False
         pass
 
     def run(self):

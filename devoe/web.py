@@ -14,8 +14,10 @@ import flask_httpauth
 from .config import config
 from .db import db
 from .logger import logger
+from .utils import locate
+from .utils import to_process
+
 from .api import Operator
-from .utils import locate, to_process
 
 
 app = flask.Flask(__name__)
