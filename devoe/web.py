@@ -12,8 +12,9 @@ import flask
 import flask_httpauth
 
 from .config import config
-from .db import db
 from .logger import logger
+from .db import db
+
 from .utils import locate
 from .utils import to_process
 
@@ -31,8 +32,8 @@ BAD_REQUEST = flask.Response(status=400)
 SERVER_ERROR = flask.Response(status=500)
 
 
-class WEBAPI():
-    """Represents API server."""
+class API():
+    """Represents web API server."""
 
     def __init__(self, host=None, port=None, dev=False):
         self.app = app
@@ -68,7 +69,7 @@ class WEBAPI():
         """Start API server."""
         self.status = True
         self.start_date = dt.datetime.now()
-        app = f'devoe.web:app'
+        app = 'devoe.web:app'
         env = os.environ.copy()
         env['DEVOE_HOME'] = locate()
         if self.dev is True:
@@ -91,7 +92,7 @@ class WEBAPI():
 
             conn = db.connect()
             table = db.tables.components
-            update = table.update().where(table.c.code == 'API')
+            update = table.update().where(table.c.id == 'RESTAPI')
             pid = proc.pid
             update = update.values(status='Y', pid=pid,
                                    start_date=self.start_date,
@@ -106,8 +107,8 @@ class WEBAPI():
         self.stop_date = dt.datetime.now()
         conn = db.connect()
         table = db.tables.components
-        select = table.select().where(table.c.code == 'API')
-        update = table.update().where(table.c.code == 'API')
+        select = table.select().where(table.c.id == 'RESTAPI')
+        update = table.update().where(table.c.id == 'RESTAPI')
         result = conn.execute(select).first()
         status = True if result.status == 'Y' else False
         pid = result.pid

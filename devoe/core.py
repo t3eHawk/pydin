@@ -4,8 +4,8 @@ import argparse
 import atexit
 import ctypes
 import datetime as dt
-import importlib as il
-import importlib.util as ilu
+import importlib as imp
+import importlib.util as impu
 import json
 import os
 import pickle
@@ -574,7 +574,7 @@ class Job():
         self.id = id
         schedule = self._parse_schedule()
         args = self._parse_arguments()
-        sysinfo = pe.sysinfo()
+        self.args = args
 
         self.name = name or schedule['name']
         self.desc = desc or schedule['desc']
@@ -624,25 +624,30 @@ class Job():
                 raise ValueError(message)
 
         # Configure dependent objects.
-        self.persons = self._parse_persons(persons or schedule['persons'])
-        self.alarm = coalesce(args.noalarm, alarm, schedule['alarm'], False)
+        recipients = coalesce(recipients, schedule['recipients'])
+        self.recipients = self._parse_recipients(recipients)
+
+        self.auto = args.auto
+        self.solo = args.solo
+        self.alarm = coalesce(args.mute, alarm, schedule['alarm'], False)
         self.debug = coalesce(args.debug, debug, schedule['debug'], False)
         logger.configure(app=self.name, desc=self.desc,
                          debug=self.debug, alarming=self.alarm,
-                         smtp={'recipients': self.persons})
+                         smtp={'recipients': self.recipients})
 
+        self.server = platform.node()
+        self.user = os.getlogin()
+        self.pid = os.getpid()
         self.file_log = self._parse_file_log()
         self.text_log = None
 
-        self.__solo = args.solo
-        self.__auto = args.auto
-
         # Shortcuts for key objects.
-        self.sysinfo = sysinfo
+        self.logger = logger
+        self.sysinfo = pe.sysinfo()
         self.creds = pe.credentials()
-        self.email = logger.root.email
+        self.email = logger.email
 
-        act = sysinfo.anons[0] if len(sysinfo.anons) > 0 else None
+        act = self.sysinfo.anons[0] if len(self.sysinfo.anons) > 0 else None
         if act is not None:
             if act == 'run':
                 self.run()
@@ -653,7 +658,10 @@ class Job():
         if self.tag is None:
             return f'Job[{self.id}]'
         elif self.tag is not None:
-            return f'Job[{self.id}:{self.tag}]'
+            if self.record_id is None:
+                return f'Job[{self.id}:{self.tag}]'
+            elif self.record_id is not None:
+                return f'Job[{self.id}:{self.tag}:{self.record_id}]'
         pass
 
     @property
@@ -781,11 +789,9 @@ class Job():
         try:
             self._run()
         except Exception:
-            self._error()
-        else:
-            self._done()
+            self._fail()
         self._end()
-        self._trigger()
+        self._trig()
         pass
 
     def store(self, **kwargs):
@@ -795,7 +801,9 @@ class Job():
 
     def _announce(self):
         logger.head()
-        logger.info(f'{self} named <{self.name}> owns PID[{self.pid}]')
+        name = f'name[{self.name}]'
+        pid = f'PID[{self.pid}]'
+        logger.info(f'{self} having {name} launched on {pid}')
         pass
 
     def _prepare(self):
@@ -853,7 +861,7 @@ class Job():
                           pid=self.pid,
                           file_log=self.file_log)
         logger.info(f'{self} started as run[{self.record_id}] '
-                    f'for date[{self.date}] using tag[{self.tag}]')
+                    f'using tag[{self.tag}] meaning date[{self.date}]')
         pass
 
     def _start_as_continue(self):
@@ -866,7 +874,7 @@ class Job():
                           pid=self.pid,
                           file_log=self.file_log)
         logger.info(f'{self} started as run[{self.record_id}] '
-                    f'for date[{self.date}] using tag[{self.tag}]')
+                    f'using tag[{self.tag}] meaning date[{self.date}]')
         pass
 
     def _start_as_rerun(self):
@@ -890,7 +898,7 @@ class Job():
                           file_log=self.file_log)
         self.initiator.write(rerun_now='Y')
         logger.info(f'{self} started as run[{self.record_id}] '
-                    f'for date[{self.date}] using tag[{self.tag}]')
+                    f'using tag[{self.tag}] meaning date[{self.date}]')
         pass
 
     def _run(self):
@@ -898,16 +906,25 @@ class Job():
         self.status = 'R'
         self.record.write(status=self.status)
         name = 'script'
-        file = f'{self.root}/script.py'
+        file = f'{self.path}/script.py'
         logger.debug(f'{self} script {file=} now will be executed')
-        spec = ilu.spec_from_file_location(name, file)
-        module = ilu.module_from_spec(spec)
+        spec = impu.spec_from_file_location(name, file)
+        module = impu.module_from_spec(spec)
         spec.loader.exec_module(module)
         logger.debug(f'{self} script {file=} executed')
         pass
 
+    def _fail(self):
+        logger.error()
+        return self.__fail()
+
+    def __fail(self):
+        self.errors.add(sys.exc_info())
+        pass
+
     def _end(self):
         logger.info(f'{self} ends...')
+        self.status = self._done() if not self.errors else self._error()
         self.end_date = dt.datetime.now()
         self.record.write(end_date=self.end_date, status=self.status,
                           text_error=self.text_error,
@@ -921,21 +938,12 @@ class Job():
         pass
 
     def _done(self):
-        if logger.with_error is True:
-            self.status = 'E'
-            self.text_error = self._parse_text_error()
-            logger.info(f'{self} completed with error')
-        else:
-            self.status = 'D'
-            logger.info(f'{self} completed')
-        pass
+        logger.info(f'{self} completed')
+        return 'D'
 
     def _error(self):
-        self.status = 'E'
-        self.text_error = self._parse_text_error()
-        logger.error()
         logger.info(f'{self} completed with error')
-        pass
+        return 'E'
 
     def _cancel(self):
         logger.info(f'Canceling {self}...')
@@ -949,8 +957,7 @@ class Job():
     def __cancel(self, signum=None, frame=None):
         # Cancel this running job.
         self._cancel()
-        sys.exit()
-        pass
+        return sys.exit()
 
     def _recognize(self):
         file = os.path.abspath(sys.argv[0])
@@ -997,25 +1004,19 @@ class Job():
             return os.path.relpath(logger.file.path)
         pass
 
-    def _parse_persons(self, persons):
-        persons = persons or []
-        recipients = logger.root.email.recipients or []
-        if isinstance(persons, (str, list)) is True:
-            if isinstance(persons, str) is True:
-                if ',' in persons:
-                    persons = persons.replace(' ', '').split(',')
+    def _parse_recipients(self, recipients):
+        recipients = recipients or []
+        if isinstance(recipients, (str, list)) is True:
+            if isinstance(recipients, str) is True:
+                if ',' in recipients:
+                    recipients = recipients.replace(' ', '').split(',')
                 else:
-                    persons = [persons]
+                    recipients = [recipients]
         else:
-            persons = []
-        persons = [*persons, *recipients]
-        return persons
-
-    def _parse_text_error(self):
-        err_type, err_value, err_tb = logger.all_errors[-1]
-        exception = tb.format_exception(err_type, err_value, err_tb)
-        text_error = ''.join(exception)
-        return text_error
+            recipients = []
+        owners = logger.root.email.recipients or []
+        recipients = [*recipients, *owners]
+        return recipients
 
     def _set_signals(self):
         # Configure signal triggers.
@@ -1026,9 +1027,9 @@ class Job():
         logger.debug(f'SIGTERM trigger set for current PID[{self.pid}]')
         pass
 
-    def _trigger(self):
-        if self.status == 'D' and self.__solo is False:
-            logger.debug('Trigger will be performed')
+    def _trig(self):
+        if self.status == 'D' and self.solo is False:
+            logger.debug(f'{self} requesting other jobs to trigger...')
             time = tm.time()
             conn = db.connect()
             table = db.tables.schedule
@@ -1036,12 +1037,14 @@ class Job():
             result = conn.execute(select).fetchall()
             total = len(result)
             if total > 0:
-                logger.info('Trigger of dependent jobs...')
-                logger.debug(f'Found {total} potential jobs to trigger')
+                logger.debug(f'{self} found {total} potential jobs to trigger')
+                logger.info(f'{self} triggering other jobs...')
                 for row in result:
                     try:
                         id = row.id
-                        repr = f'Job[{id}]'
+                        tag = self.tag
+                        trigger_id = self.record_id
+                        repr = f'Job[{id}:{tag}]'
                         status = True if row.status == 'Y' else False
                         start = to_timestamp(row.start_date) or time-1
                         end = to_timestamp(row.end_date) or time+1
@@ -1057,20 +1060,18 @@ class Job():
 
                         exe = config['ENVIRONMENTS'].get(env)
                         file = os.path.abspath(f'{self.path}/../{id}/job.py')
-                        tag = self.tag
-                        trigger_id = self.record_id
                         args += f' run -a --tag {tag} --trigger {trigger_id}'
                         proc = to_process(exe, file, args=args)
                         logger.info(f'{repr} runs on PID {proc.pid}')
                     except Exception:
                         logger.error()
-                logger.info('Trigger of dependent jobs done')
+                logger.info(f'{self} other jobs triggered')
             else:
-                logger.debug('No dependent jobs to trigger')
+                logger.debug(f'{self} no other jobs triggered')
         else:
             logger.debug('Trigger is not required '
                          'due to one of the parameters: '
-                         f'status={self.status}, solo={self.__solo}')
+                         f'status={self.status}, solo={self.solo}')
         pass
 
 
@@ -1084,20 +1085,19 @@ class Task():
         self.job = None
         self.job_id = None
         self.run_id = None
-        cache = il.import_module('devoe.cache')
-        if hasattr(cache, 'Job') and isinstance(cache.Job, Job):
-            logger.debug(f'Using {cache.Job} configuration for {self}...')
-            self.job = cache.Job
-            self.name = cache.Job.name
-            self.date = cache.Job.date
-            self.job_id = cache.Job.id
-            self.run_id = cache.Job.run_id
-            logger.info(f'Used {cache.Job} configuration for {self}')
-        self.calendar = calendar.Day(self.date)
+        if Job.exists():
+            job = Job.get()
+            logger.debug(f'Using {job} configuration in {self}...')
+            self.job = job
+            self.name = job.name
+            self.date = job.date
+            self.job_id = job.id
+            self.run_id = job.record_id
+            logger.info(f'{job} configuration is used in {self}')
 
         self.logging = logging if isinstance(logging, Logging) else Logging()
         self.logger = self.logging.task.setup()
-        logger.debug(f'{self.logger.name} is used for {self} logging')
+        logger.debug(f'{self.logger.name} is used in {self} logging')
 
         self.updated = None
         self.start_date = None
@@ -1108,21 +1108,20 @@ class Task():
         self._records_found = 0
         self._files_found = 0
         self._bytes_found = 0
-        self.errors = []
+        self.errors = set()
 
-        self.initiator = 'S' if getattr(self.job, 'auto', 0) > 0 else 'U'
+        self.mode = 'A' if getattr(self.job, 'auto', 0) > 0 else 'M'
         self.server = platform.node()
         self.user = os.getlogin()
         self.file_log = logger.file.path if logger.file.status else None
 
+        self.calendar = calendar.Day(self.date)
         pass
 
     def __repr__(self):
         """Represent task."""
         if self.id is not None:
             return f'Task[{self.id}]'
-        elif self.job_id is not None and self.run_id is not None:
-            return f'Task[{self.job.id}:{self.job.run_id}]'
         else:
             return 'Task'
         pass
@@ -1222,7 +1221,8 @@ class Task():
     def text_error(self):
         """Get textual exception from the last registered error."""
         if self.errors:
-            return ''.join(tb.format_exception(*self.errors[-1]))
+            err_type, err_value, err_tb = list(self.errors)[-1]
+            return ''.join(tb.format_exception(err_type, err_value, err_tb))
         else:
             return None
         pass
@@ -1232,7 +1232,10 @@ class Task():
         logger.line('-------------------')
         self._prepare()
         self._start()
-        self._execute()
+        try:
+            self._execute()
+        except Exception:
+            self._fail()
         self._end()
         logger.line('-------------------')
         return self.result()
@@ -1247,6 +1250,10 @@ class Task():
 
     def execute(self):
         """Execute task."""
+        pass
+
+    def fail(self):
+        """Execute in case of fail."""
         pass
 
     def end(self):
@@ -1279,25 +1286,30 @@ class Task():
                           **{key: value for key, value in self.__dict__.items()
                              if key in self.logging.task.optional
                              and self.logging.task.fields[key] is True})
-        self.start()
+        atexit.register(self._exit)
         logger.debug(f'{self} started')
-        return atexit.register(self._exit)
+        return self.start()
 
     def _execute(self):
         logger.info(f'Executing {self}...')
         logger.info(f'{self} steps: {[s.graph for s in self.steps.values()]}')
-        try:
-            self.status = 'R'
-            self.execute()
-        except Exception:
-            self._error()
-        else:
-            self._done()
-        pass
+        self.status = 'R'
+        return self.execute()
+
+    def _fail(self):
+        logger.error()
+        return self.__fail()
+
+    def __fail(self):
+        exc_info = sys.exc_info()
+        self.errors.add(exc_info)
+        if self.job is not None:
+            self.job.errors.add(exc_info)
+        return self.fail()
 
     def _end(self):
         logger.debug(f'Ending {self}...')
-        self.end()
+        self.status = self._done() if not self.errors else self._error()
         if self.status == 'D':
             self.end_date = dt.datetime.now()
             self.logger.table(end_date=self.end_date)
@@ -1305,22 +1317,15 @@ class Task():
             if self.logging.task.fields.get('text_error'):
                 self.logger.table(text_error=self.text_error)
         logger.info(f'{self} ended')
-        pass
+        return self.end()
 
     def _done(self):
-        self.status = 'D' if not self.errors else 'E'
-        if self.status == 'D':
-            logger.info(f'{self} executed')
-        elif self.status == 'E':
-            logger.info(f'{self} executed with error')
-        pass
+        logger.info(f'{self} executed')
+        return 'D'
 
     def _error(self):
-        self.status = 'E'
-        self.errors.append((sys.exc_info()))
         logger.info(f'{self} executed with error')
-        logger.error()
-        pass
+        return 'E'
 
     def _exit(self):
         logger.debug(f'{self} exits...')
@@ -1329,6 +1334,76 @@ class Task():
                 logger.debug(f'Caught unexpected end in {self}')
                 self.status = 'U'
         logger.debug(f'{self} exit performed')
+        pass
+
+    pass
+
+
+class Element():
+    """Represents task elements."""
+
+    def __repr__(self):
+        """Represent element with its name."""
+        return self.name
+
+    @property
+    def task(self):
+        """Get element task."""
+        return self._task
+
+    @task.setter
+    def task(self, value):
+        """Set element task."""
+        if isinstance(value, Pipeline) or value is None:
+            self._task = value
+        else:
+            message = (f'task must be Task, not {value.__class__.__name__}')
+            raise TypeError(message)
+        pass
+
+    @property
+    def name(self):
+        """Get element name."""
+        return self._name
+
+    @name.setter
+    def name(self, value):
+        """Set element name."""
+        if isinstance(value, str):
+            self._name = value
+        else:
+            message = f'name must be str, not {value.__class__.__name__}'
+            raise TypeError(message)
+        pass
+
+    @property
+    def seqno(self):
+        """Get element sequence number."""
+        return self._seqno
+
+    @seqno.setter
+    def seqno(self, value):
+        """Set element sequence number."""
+        if isinstance(value, int) or value is None:
+            self._seqno = value
+        else:
+            message = f'seqno must be int, not {value.__class__.__name__}'
+            raise TypeError(message)
+        pass
+
+    def rename(self, new_name):
+        """Change element name."""
+        self.name = new_name
+        pass
+
+    def sort(self, new_seqno):
+        """Change element sequence number."""
+        self.seqno = new_seqno
+        pass
+
+    def attach(self, task):
+        """Assign element to the task passed as argument."""
+        self.task = task
         pass
 
     pass
@@ -1431,171 +1506,25 @@ class Pipeline(Task):
     pass
 
 
-class Element():
-    """Represents pipeline elements such as Item or Step."""
-
-    def __repr__(self):
-        """Represent element with its name."""
-        return self.name
+class Component(Element):
+    """Represents pipeline component."""
 
     @property
     def pipeline(self):
-        """Get element pipeline."""
-        return self._pipeline
+        """Get element pipeline (task)."""
+        return self.task
 
     @pipeline.setter
     def pipeline(self, value):
-        """Set element pipeline."""
-        if isinstance(value, Pipeline) or value is None:
-            self._pipeline = value
-        else:
-            message = (f'pipeline must be Pipeline, '
-                       f'not {value.__class__.__name__}')
-            raise TypeError(message)
-        pass
-
-    @property
-    def name(self):
-        """Get element name."""
-        return self._name
-
-    @name.setter
-    def name(self, value):
-        """Set element name."""
-        if isinstance(value, str):
-            self._name = value
-        else:
-            message = f'name must be str, not {value.__class__.__name__}'
-            raise TypeError(message)
-        pass
-
-    @property
-    def seqno(self):
-        """Get element sequence number."""
-        return self._seqno
-
-    @seqno.setter
-    def seqno(self, value):
-        """Set element sequence number."""
-        if isinstance(value, int) or value is None:
-            self._seqno = value
-        else:
-            message = f'seqno must be int, not {value.__class__.__name__}'
-            raise TypeError(message)
-        pass
-
-    def rename(self, new_name):
-        """Change element name."""
-        self.name = new_name
-        pass
-
-    def sort(self, new_seqno):
-        """Change element sequence number."""
-        self.seqno = new_seqno
-        pass
-
-    def attach(self, pipeline):
-        """Assign element to the pipeline passed as argument."""
-        self.pipeline = pipeline
+        """Set element pipeline (task)."""
+        self.task = value
         pass
 
     pass
 
 
-class Item(Element):
-    """Represents single step item."""
-
-    def __init__(self, name=None, seqno=None, pipeline=None):
-        self.name = name or __class__.__name__
-        self.seqno = seqno
-        self.thread = None
-        self.pipeline = pipeline
-        self._prev = []
-        self._next = []
-        self._steps = []
-        pass
-
-    @property
-    def item_name(self):
-        """Get item name."""
-        return self.name
-
-    @item_name.setter
-    def item_name(self, value):
-        """Set item name."""
-        self.name = value
-        pass
-
-    @property
-    def prev(self):
-        """List all connected items that precede this one."""
-        return self._prev
-
-    @prev.setter
-    def prev(self, item):
-        """Connect the item as a preceding to this one."""
-        if isinstance(item, Item) and item not in self._prev:
-            self._prev.append(item)
-            item.next = self
-        pass
-
-    @property
-    def next(self):
-        """List all connected items that proceed this one."""
-        return self._next
-
-    @next.setter
-    def next(self, item):
-        """Connect the item as a proceeding to this one."""
-        if isinstance(item, Item) and item not in self._next:
-            self._next.append(item)
-        pass
-
-    @property
-    def joins(self):
-        """List all steps where the item is a join."""
-        return self._steps
-
-    def attach(self, pipeline, root=None):
-        """Assign item to the pipeline passed as argument."""
-        self.pipeline = pipeline
-        self.prev = root
-        name = self.name
-        seqno = 1
-        while True:
-            if self.pipeline.items.get(name) is None:
-                self.sort(seqno)
-                if seqno > 1:
-                    self.rename(name)
-                break
-            elif self.pipeline.items.get(name) == self:
-                return
-            else:
-                seqno += 1
-                name = f'{self.name}-{seqno}'
-        self.pipeline.items[name] = self
-        logger.debug(f'{self} attached to {pipeline}')
-        pass
-
-    def join(self, step):
-        """Make item a join between current step and following steps."""
-        if isinstance(step, Step):
-            if step not in self._steps:
-                self._steps.append(step)
-        else:
-            message = (f'step must be Step, not {step.__class__.__name__}')
-            raise TypeError(message)
-        pass
-
-    def prepare(self):
-        """Prepare Item."""
-        pass
-
-    pass
-
-
-class Step(Element):
-    """Represents single task step."""
+class Step(Component):
+    """Represents single pipeline step."""
 
     def __init__(self, name=None, seqno=None, a=None, b=None, c=None,
                  pipeline=None):
@@ -1625,13 +1554,12 @@ class Step(Element):
         self._records_found = 0
         self._result_value = 0
         self._result_long = 0
-        self.errors = []
+        self.errors = set()
 
-        self.initiator = None
+        self.mode = None
         self.server = platform.node()
         self.user = os.getlogin()
         self.file_log = logger.file.path if logger.file.status else None
-
         pass
 
     def __repr__(self):
@@ -1797,7 +1725,8 @@ class Step(Element):
     def text_error(self):
         """Get textual exception from the last registered error."""
         if self.errors:
-            return ''.join(tb.format_exception(*self.errors[-1]))
+            err_type, err_value, err_tb = list(self.errors)[-1]
+            return ''.join(tb.format_exception(err_type, err_value, err_tb))
         else:
             return None
         pass
@@ -1824,17 +1753,20 @@ class Step(Element):
                 name = f'{self.name}-{seqno}'
         self.pipeline.steps[name] = self
         self.date = self.pipeline.date
-        self.initiator = self.pipeline.initiator
+        self.mode = self.pipeline.mode
         self.logging = self.pipeline.logging
         self.logger = self.pipeline.logging.step.setup(self)
-        logger.debug(f'{self.logger.name} is used for {self} logging')
+        logger.debug(f'{self.logger.name} is used in {self} logging')
         logger.debug(f'{self}: {self.graph} - attached to {pipeline}')
         pass
 
     def run(self):
         """Run step."""
         self._start()
-        self._execute()
+        try:
+            self._execute()
+        except Exception:
+            self._fail()
         self._end()
         return self.resume()
 
@@ -1855,9 +1787,9 @@ class Step(Element):
             select = f'SELECT * FROM {table} WHERE id = {self.id}'
             logger.info(f'{self} DB query: {select}')
         self.logger.table(start_date=self.start_date,
-                          task_id=self.pipeline.id,
-                          job_id=self.pipeline.job_id,
-                          run_id=self.pipeline.run_id,
+                          task_id=self.task.id,
+                          job_id=self.task.job_id,
+                          run_id=self.task.run_id,
                           step_name=self.name,
                           step_type=self.type,
                           step_date=self.date,
@@ -1876,32 +1808,41 @@ class Step(Element):
     def _execute(self):
         logger.info(f'Executing {self}...')
         logger.info(f'{self} is {self.type} operation: {self.graph}')
-        try:
-            self.status = 'R'
-            if self.type == 'ETL':
-                self.c.prepare()
-                self.a.to_extractor(self, self.input)
-                self.b.to_transformer(self, self.input, self.output)
-                self.c.to_loader(self, self.output)
-            elif self.type == 'EL':
-                self.b.prepare()
-                self.a.to_extractor(self, self.queue)
-                self.b.to_loader(self, self.queue)
-            elif self.type == 'EX':
-                self.a.prepare()
-                self.a.to_executor(self)
-            for thread in self.threads:
-                logger.debug(f'Waiting for {thread.name} to finish...')
-                thread.join()
-                logger.debug(f'{thread.name} finished')
-        except Exception:
-            self._error()
-        else:
-            self._done()
+        self.status = 'R'
+        if self.type == 'ETL':
+            self.c.prepare()
+            self.a.to_extractor(self, self.input)
+            self.b.to_transformer(self, self.input, self.output)
+            self.c.to_loader(self, self.output)
+        elif self.type == 'EL':
+            self.b.prepare()
+            self.a.to_extractor(self, self.queue)
+            self.b.to_loader(self, self.queue)
+        elif self.type == 'EX':
+            self.a.prepare()
+            self.a.to_executor(self)
+        for thread in self.threads:
+            logger.debug(f'Waiting for {thread.name} to finish...')
+            thread.join()
+            logger.debug(f'{thread.name} finished')
+        pass
+
+    def _fail(self):
+        logger.error()
+        return self.__fail()
+
+    def __fail(self):
+        exc_info = sys.exc_info()
+        self.errors.add(exc_info)
+        if self.task is not None:
+            self.task.errors.add(exc_info)
+            if self.task.job is not None:
+                self.task.job.errors.add(exc_info)
         pass
 
     def _end(self):
         logger.debug(f'Ending {self}...')
+        self.status = self._done() if not self.errors else self._error()
         if self.status == 'D':
             self.end_date = dt.datetime.now()
             self.logger.table(end_date=self.end_date)
@@ -1912,20 +1853,12 @@ class Step(Element):
         pass
 
     def _done(self):
-        self.status = 'D' if not self.errors else 'E'
-        if self.status == 'D':
-            logger.info(f'{self} executed')
-        elif self.status == 'E':
-            logger.info(f'{self} executed with error')
-        pass
+        logger.info(f'{self} executed')
+        return 'D'
 
     def _error(self):
-        self.status = 'E'
-        self.errors.append(sys.exc_info())
-        self.pipeline.errors.append(self.errors[-1])
         logger.info(f'{self} executed with error')
-        logger.error()
-        pass
+        return 'E'
 
     def _exit(self):
         logger.debug(f'{self} exits...')
@@ -1934,6 +1867,103 @@ class Step(Element):
                 logger.debug(f'Caught unexpected end in {self}')
                 self.status = 'U'
         logger.debug(f'{self} exit performed')
+        pass
+
+    pass
+
+
+class Item(Component):
+    """Represents single pipeline item."""
+
+    extractable = False
+    transformable = False
+    loadable = False
+    executable = False
+
+    def __init__(self, name=None, seqno=None, pipeline=None):
+        self.name = name or __class__.__name__
+        self.seqno = seqno
+        self.thread = None
+        self.pipeline = pipeline
+        self._prev = []
+        self._next = []
+        self._steps = []
+        pass
+
+    @property
+    def item_name(self):
+        """Get item name."""
+        return self.name
+
+    @item_name.setter
+    def item_name(self, value):
+        """Set item name."""
+        self.name = value
+        pass
+
+    @property
+    def prev(self):
+        """List all connected items that precede this one."""
+        return self._prev
+
+    @prev.setter
+    def prev(self, item):
+        """Connect the item as a preceding to this one."""
+        if isinstance(item, Item) and item not in self._prev:
+            self._prev.append(item)
+            item.next = self
+        pass
+
+    @property
+    def next(self):
+        """List all connected items that proceed this one."""
+        return self._next
+
+    @next.setter
+    def next(self, item):
+        """Connect the item as a proceeding to this one."""
+        if isinstance(item, Item) and item not in self._next:
+            self._next.append(item)
+        pass
+
+    @property
+    def joins(self):
+        """List all steps where the item is a join."""
+        return self._steps
+
+    def attach(self, pipeline, root=None):
+        """Assign item to the pipeline passed as argument."""
+        self.pipeline = pipeline
+        self.prev = root
+        name = self.name
+        seqno = 1
+        while True:
+            if self.pipeline.items.get(name) is None:
+                self.sort(seqno)
+                if seqno > 1:
+                    self.rename(name)
+                break
+            elif self.pipeline.items.get(name) == self:
+                return
+            else:
+                seqno += 1
+                name = f'{self.name}-{seqno}'
+        self.pipeline.items[name] = self
+        logger.debug(f'{self} attached to {pipeline}')
+        pass
+
+    def join(self, step):
+        """Make item a join between current step and following steps."""
+        if isinstance(step, Step):
+            if step not in self._steps:
+                self._steps.append(step)
+        else:
+            message = (f'step must be Step, not {step.__class__.__name__}')
+            raise TypeError(message)
+        pass
+
+    def prepare(self):
+        """Prepare Item."""
         pass
 
     pass
