@@ -788,6 +788,11 @@ class Job():
         self._trigger()
         pass
 
+    def store(self, **kwargs):
+        """Store the given arguments in a special job namespace."""
+        new = {k: v for k, v in kwargs.items() if k not in self.data.__dict__}
+        return self.data.__dict__.update(new)
+
     def _announce(self):
         logger.head()
         logger.info(f'{self} named <{self.name}> owns PID[{self.pid}]')
