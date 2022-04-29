@@ -17,57 +17,13 @@ import xml.dom.minidom as xdom
 import sqlalchemy as sa
 import sqlparse as spe
 
-from .core import Item
 from .config import connector, calendar
 from .config import Localhost, Server, Database
 from .logger import logger
 
 from .utils import to_sql
 
-
-class Base(Item):
-    """Represents base class for all ETL Items."""
-
-    extractable = False
-    transformable = False
-    loadable = False
-    executable = False
-
-    @property
-    def server(self):
-        """Get server object."""
-        return self._server
-
-    @server.setter
-    def server(self, value):
-        if isinstance(value, (Localhost, Server)):
-            self._server = value
-        elif isinstance(value, str):
-            if value == 'localhost':
-                self._server = Localhost()
-            else:
-                self._server = connector.receive(value)
-        pass
-
-    @property
-    def db(self):
-        """Get database object (short)."""
-        return self._database
-
-    @property
-    def database(self):
-        """Get database object."""
-        return self._database
-
-    @database.setter
-    def database(self, value):
-        if isinstance(value, Database):
-            self._database = value
-        elif isinstance(value, str):
-            self._database = connector.receive(value)
-        pass
-
-    pass
+from .core import Item
 
 
 class Extractable():
@@ -203,7 +159,53 @@ class Executable():
     pass
 
 
-class Mapper(Transformable, Base):
+class DB():
+    """Represents base class for all DB items."""
+
+    @property
+    def db(self):
+        """Get database object (short)."""
+        return self._database
+
+    @property
+    def database(self):
+        """Get database object."""
+        return self._database
+
+    @database.setter
+    def database(self, value):
+        if isinstance(value, Database):
+            self._database = value
+        elif isinstance(value, str):
+            self._database = connector.receive(value)
+        pass
+
+    pass
+
+
+class OS():
+    """Represents base class for all OS items."""
+
+    @property
+    def server(self):
+        """Get server object."""
+        return self._server
+
+    @server.setter
+    def server(self, value):
+        if isinstance(value, (Localhost, Server)):
+            self._server = value
+        elif isinstance(value, str):
+            if value == 'localhost':
+                self._server = Localhost()
+            else:
+                self._server = connector.receive(value)
+        pass
+
+    pass
+
+
+class Mapper(Transformable, Item):
     """Represents basic mapper used for data transformation."""
 
     def __init__(self, item_name=None):
@@ -217,7 +219,7 @@ class Mapper(Transformable, Base):
     pass
 
 
-class Table(Extractable, Loadable, Base):
+class Table(Extractable, Loadable, DB, Item):
     """Represents database table as ETL Item."""
 
     def __init__(self, item_name=None, database=None, schema=None,
@@ -411,7 +413,7 @@ class Table(Extractable, Loadable, Base):
     pass
 
 
-class SQL(Executable, Base):
+class SQL(Executable, DB, Item):
     """Represents SQL script as ETL Item."""
 
     def __init__(self, item_name=None, database=None, text=None, file=None,
@@ -506,7 +508,7 @@ class SQL(Executable, Base):
     pass
 
 
-class Select(Extractable, Base):
+class Select(Extractable, DB, Item):
     """Represents SQL select as ETL Item."""
 
     def __init__(self, item_name=None, database=None, text=None, file=None,
@@ -676,7 +678,7 @@ class Select(Extractable, Base):
     pass
 
 
-class Insert(Executable, Base):
+class Insert(Executable, DB, Item):
     """Represents SQL insert as ETL Item."""
 
     def __init__(self, item_name=None, database=None, schema=None, table=None,
@@ -887,7 +889,7 @@ class Insert(Executable, Base):
     pass
 
 
-class File(Extractable, Loadable, Base):
+class File(Extractable, Loadable, OS, Item):
     """Represents file as ETL item."""
 
     def __init__(self, item_name=None, path=None, file_name=None,
@@ -1207,7 +1209,7 @@ class XML(File):
     pass
 
 
-class Files(Extractable, Base):
+class Files(Extractable, OS, Item):
     """Represents file sequence as ETL Item."""
 
     def __init__(self, item_name=None, server='localhost', path=None,
@@ -1384,7 +1386,7 @@ class Files(Extractable, Base):
     pass
 
 
-class FileManager(Loadable, Base):
+class FileManager(Loadable, OS, Item):
     """Represents file manager as ETL Item."""
 
     def __init__(self, item_name=None, server='localhost', action='copy',
