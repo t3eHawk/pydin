@@ -22,6 +22,7 @@ from .config import Localhost, Server, Database
 from .logger import logger
 
 from .utils import to_sql
+from .utils import coalesce
 
 from .core import Item
 
@@ -44,9 +45,12 @@ class Extractable():
         """Extract data."""
         logger.info(f'Reading {self} records...')
         for dataset in self.extract(step):
-            queue.put(dataset)
-            step.records_read = len(dataset)
-            logger.info(f'{step.records_read} records read')
+            try:
+                queue.put(dataset)
+                step.records_read = len(dataset)
+                logger.info(f'{step.records_read} records read')
+            except Exception:
+                logger.error()
         pass
 
     pass
@@ -118,11 +122,11 @@ class Loadable():
             else:
                 dataset = queue.get()
                 try:
-                    self.load(step, dataset)
+                    result = self.load(step, dataset)
                 except Exception:
                     logger.error()
                 else:
-                    step.records_written = len(dataset)
+                    step.records_written = len(coalesce(result, dataset))
                     logger.info(f'{step.records_written} records written')
                     queue.task_done()
         pass
@@ -408,7 +412,8 @@ class Table(Extractable, Loadable, DB, Item):
 
     def load(self, step, dataset):
         """Load data."""
-        return self.insert(dataset)
+        self.insert(dataset)
+        pass
 
     pass
 
@@ -485,7 +490,7 @@ class SQL(Executable, DB, Item):
         return result
 
     def _format(self, text):
-        text = text.format(task=self.pipeline)
+        text = text.format(task=self.task)
         return text
 
     def _hintinize(self, text):
@@ -529,7 +534,6 @@ class Select(Extractable, DB, Item):
         self.columns = columns
         self.alias = alias
         self.fetch_size = fetch_size
-
         pass
 
     @property
@@ -655,7 +659,7 @@ class Select(Extractable, DB, Item):
         return self.fetch()
 
     def _format(self, text):
-        text = text.format(task=self.pipeline)
+        text = text.format(task=self.task)
         return text
 
     def _hintinize(self, text):
@@ -819,46 +823,8 @@ class Insert(Executable, DB, Item):
         columns = answerset.keys()
         return columns
 
-    def delete(self):
-        """Delete table data."""
-        conn = self.db.connect()
-        table = self.object
-        query = table.delete()
-        result = conn.execute(query)
-        logger.info(f'{result.rowcount} {self.table} records deleted')
-        pass
-
-    def truncate(self):
-        """Truncate table data."""
-        conn = self.db.engine.connect()
-        table = self.address
-        query = sa.text(f'truncate table {table}')
-        conn.execute(query)
-        logger.info(f'Table {self.table} truncated')
-        pass
-
-    def prepare(self):
-        """Prepare table."""
-        if self.purge is True:
-            logger.debug(f'Table {self.table} will be purged')
-            if self.db.vendor == 'oracle':
-                self.truncate()
-            else:
-                self.delete()
-        pass
-
-    def execute(self, step):
-        """Execute action."""
-        query = self.parse()
-        conn = self.db.connect()
-        logger.info(f'Running SQL query...')
-        logger.line(f'-------------------\n{query}\n-------------------')
-        result = conn.execute(query)
-        logger.info(f'SQL query completed')
-        return result.rowcount
-
     def _format(self, text):
-        text = text.format(task=self.pipeline)
+        text = text.format(task=self.task)
         return text
 
     def _hintinize(self, text):
@@ -885,6 +851,89 @@ class Insert(Executable, DB, Item):
                         statements[0].tokens[i] = new_token
             text = str(statements[0])
         return text
+
+    def prepare(self):
+        """Prepare table."""
+        self.logger = self._createlog()
+        if self.purge is True:
+            logger.debug(f'Table {self.table} will be purged')
+            if self.db.vendor == 'oracle':
+                self.truncate()
+            else:
+                self.delete()
+        pass
+
+    def delete(self):
+        """Delete table data."""
+        conn = self.db.connect()
+        table = self.object
+        query = table.delete()
+        result = conn.execute(query)
+        logger.info(f'{result.rowcount} {self.table} records deleted')
+        pass
+
+    def truncate(self):
+        """Truncate table data."""
+        conn = self.db.engine.connect()
+        table = self.address
+        query = sa.text(f'truncate table {table}')
+        conn.execute(query)
+        logger.info(f'Table {self.table} truncated')
+        pass
+
+    def execute(self, step):
+        """Execute action."""
+        conn = self.db.connect()
+        query = self.parse()
+        logger.info(f'Running SQL query...')
+        logger.line(f'-------------------\n{query}\n-------------------')
+        self._startlog(job_id=self.task.job_id,
+                       run_id=self.task.run_id,
+                       task_id=self.task.id,
+                       step_id=step.id,
+                       db_name=self.db.name,
+                       table_name=self.table,
+                       query_text=query)
+        try:
+            result = conn.execute(query)
+        except sa.exc.SQLAlchemyError as error:
+            self._endlog(error_text=error.orig.__str__())
+            logger.info(f'SQL query failed')
+            raise error
+        else:
+            self._endlog(output_rows=result.rowcount)
+            logger.info(f'SQL query completed')
+            return result.rowcount
+        pass
+
+    def _createlog(self):
+        """Generate special file logger."""
+        return self.task.logging.sql.setup()
+
+    def _startlog(self, job_id=None, run_id=None, task_id=None, step_id=None,
+                  db_name=None, table_name=None, query_text=None):
+        """Start SQL logging."""
+        self.logger.root.table.new()
+        self.logger.table(job_id=job_id,
+                          run_id=run_id,
+                          task_id=task_id,
+                          step_id=step_id,
+                          db_name=db_name,
+                          table_name=table_name,
+                          query_type=self.__class__.__name__,
+                          query_text=query_text,
+                          start_date=dt.datetime.now())
+        pass
+
+    def _endlog(self, output_rows=None, output_text=None,
+                error_code=None, error_text=None):
+        """End SQL logging."""
+        self.logger.table(end_date=dt.datetime.now(),
+                          output_rows=output_rows,
+                          output_text=output_text,
+                          error_code=error_code,
+                          error_text=error_text)
+        pass
 
     pass
 
@@ -1361,7 +1410,7 @@ class Files(Extractable, OS, Item):
 
     def between(self):
         """Parse date range used for file filtering."""
-        today = getattr(self.pipeline, 'calendar', None) or calendar.Today()
+        today = getattr(self.task, 'calendar', None) or calendar.Today()
         if isinstance(self.created, (dict, list, tuple)):
             if isinstance(self.created, dict):
                 date_from = self.created.get('date_from', 'None')
@@ -1477,15 +1526,15 @@ class FileManager(Loadable, OS, Item):
 
     def createlog(self):
         """Generate special file logger."""
-        self.logger = self.pipeline.logging.file.setup()
+        self.logger = self.task.logging.file.setup()
         pass
 
     def startlog(self, step, fileinfo):
         """Start particular file logging."""
         self.logger.root.table.new()
-        self.logger.table(job_id=self.pipeline.job_id,
-                          run_id=self.pipeline.run_id,
-                          task_id=self.pipeline.id,
+        self.logger.table(job_id=self.task.job_id,
+                          run_id=self.task.run_id,
+                          task_id=self.task.id,
                           step_id=step.id,
                           server=fileinfo['server'].host,
                           file_name=fileinfo['file'],
