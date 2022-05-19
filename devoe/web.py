@@ -11,14 +11,14 @@ import sys
 import flask
 import flask_httpauth
 
+from .api import Driver
+
+from .db import db
 from .config import config
 from .logger import logger
-from .db import db
 
 from .utils import locate
 from .utils import to_process
-
-from .api import Operator
 
 
 app = flask.Flask(__name__)
@@ -150,8 +150,8 @@ def help():
 @auth.login_required
 def start_scheduler():
     """."""
-    operator = Operator(root=root)
-    pid = operator.start_scheduler()
+    driver = Driver(root=root)
+    pid = driver.start_scheduler()
     if pid is None:
         return SERVER_ERROR
     else:
@@ -163,8 +163,8 @@ def start_scheduler():
 @auth.login_required
 def stop_scheduler():
     """."""
-    operator = Operator(root=root)
-    operator.stop_scheduler()
+    driver = Driver(root=root)
+    driver.stop_scheduler()
     return OK
 
 
@@ -172,8 +172,8 @@ def stop_scheduler():
 @auth.login_required
 def create_job():
     """."""
-    operator = Operator(root=root)
-    operator.create_job()
+    driver = Driver(root=root)
+    driver.create_job()
     return OK
 
 
@@ -184,8 +184,8 @@ def enable_job():
     request = flask.request
     id = request.args.get('id')
     if id is not None and id.isdigit() is True:
-        operator = Operator(root=root)
-        result = operator.enable_job(id)
+        driver = Driver(root=root)
+        result = driver.enable_job(id)
         if result is True:
             return OK
         else:
@@ -202,8 +202,8 @@ def disable_job():
     request = flask.request
     id = request.args.get('id')
     if id is not None and id.isdigit() is True:
-        operator = Operator(root=root)
-        result = operator.disable_job(id)
+        driver = Driver(root=root)
+        result = driver.disable_job(id)
         if result is True:
             return OK
         else:
@@ -232,8 +232,8 @@ def run_job():
                 key = 'date'
                 value = dt.datetime.fromisoformat(date)
             kwargs[key] = value
-        operator = Operator(root=root)
-        proc = operator.run_job(id, wait=False, **kwargs)
+        driver = Driver(root=root)
+        proc = driver.run_job(id, wait=False, **kwargs)
         if wait is True:
             proc.wait()
             if proc.returncode > 0:
@@ -253,10 +253,10 @@ def sync_repo():
     """."""
     request = flask.request
     id = request.args.get('id')
-    operator = Operator(root=root)
-    operator.pull_repo()
+    driver = Driver(root=root)
+    driver.pull_repo()
     kwargs = {}
     if id is not None and id.isdigit() is True:
         kwargs['id'] = int(id)
-    operator.push_repo(**kwargs)
+    driver.push_repo(**kwargs)
     return OK

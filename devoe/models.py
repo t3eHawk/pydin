@@ -1,4 +1,4 @@
-"""Contains Item prototypes and built-in Items."""
+"""Contains model prototypes and built-in models."""
 
 import csv
 import datetime as dt
@@ -24,16 +24,41 @@ from .logger import logger
 from .utils import to_sql
 from .utils import coalesce
 
-from .core import Item
+from .core import Node
+
+
+class Model(Node):
+    """Represents single pipeline model."""
+
+    extractable = False
+    transformable = False
+    loadable = False
+    executable = False
+
+    def __init__(self, name=None):
+        super().__init__(name=(name or __class__.__name__))
+        pass
+
+    @property
+    def model_name(self):
+        """Get model name."""
+        return self.name
+
+    @model_name.setter
+    def model_name(self, value):
+        self.name = value
+        pass
+
+    pass
 
 
 class Extractable():
-    """Represents extractable Item."""
+    """Represents extractable model."""
 
     extractable = True
 
     def to_extractor(self, step, queue):
-        """Start Item extractor."""
+        """Start model extractor."""
         name = f'{step.thread.name}-Extractor'
         target = dict(target=self.extractor, args=(step, queue))
         self.thread = th.Thread(name=name, **target, daemon=True)
@@ -43,7 +68,7 @@ class Extractable():
 
     def extractor(self, step, queue):
         """Extract data."""
-        logger.info(f'Reading {self} records...')
+        logger.info(f'Reading records from {self}...')
         for dataset in self.extract(step):
             try:
                 queue.put(dataset)
@@ -57,12 +82,12 @@ class Extractable():
 
 
 class Transformable():
-    """Represents transformable Item."""
+    """Represents transformable model."""
 
     transformable = True
 
     def to_transformer(self, step, input, output):
-        """Start Item transformer."""
+        """Start model transformer."""
         name = f'{step.thread.name}-Transformer'
         target = dict(target=self.transformator, args=(step, input, output))
         self.thread = th.Thread(name=name, **target, daemon=True)
@@ -72,7 +97,7 @@ class Transformable():
 
     def transformator(self, step, input, output):
         """Transform data."""
-        logger.info(f'Processing {self} records...')
+        logger.info(f'Processing records of {self}...')
         processed = 0
         while True:
             if input.empty() is True:
@@ -97,12 +122,12 @@ class Transformable():
 
 
 class Loadable():
-    """Represents loadable Item."""
+    """Represents loadable model."""
 
     loadable = True
 
     def to_loader(self, step, queue):
-        """Start Item loader."""
+        """Start model loader."""
         name = f'{step.thread.name}-Loader'
         target = dict(target=self.loader, args=(step, queue))
         self.thread = th.Thread(name=name, **target, daemon=True)
@@ -112,7 +137,7 @@ class Loadable():
 
     def loader(self, step, queue):
         """Load data."""
-        logger.info(f'Writing {self} records...')
+        logger.info(f'Writing records to {self}...')
         while True:
             if queue.empty() is True:
                 if step.extraction is True or step.transformation is True:
@@ -135,12 +160,12 @@ class Loadable():
 
 
 class Executable():
-    """Represents executable Item."""
+    """Represents executable model."""
 
     executable = True
 
     def to_executor(self, step):
-        """Start Item executor."""
+        """Start model executor."""
         name = f'{step.thread.name}-Executor'
         target = dict(target=self.executor, args=(step,))
         self.thread = th.Thread(name=name, **target, daemon=True)
@@ -209,11 +234,11 @@ class OS():
     pass
 
 
-class Mapper(Transformable, Item):
+class Mapper(Transformable, Model):
     """Represents basic mapper used for data transformation."""
 
-    def __init__(self, item_name=None):
-        super().__init__(name=(item_name or __class__.__name__))
+    def __init__(self, model_name=None):
+        super().__init__(name=(model_name or __class__.__name__))
         pass
 
     def transform(self, input):
@@ -223,13 +248,13 @@ class Mapper(Transformable, Item):
     pass
 
 
-class Table(Extractable, Loadable, DB, Item):
-    """Represents database table as ETL Item."""
+class Table(Extractable, Loadable, DB, Model):
+    """Represents database table as ETL model."""
 
-    def __init__(self, item_name=None, database=None, schema=None,
+    def __init__(self, model_name=None, database=None, schema=None,
                  table_name=None, db_link=None, fetch_size=1000,
                  purge=False, append=False):
-        super().__init__(name=(item_name or __class__.__name__))
+        super().__init__(name=(model_name or __class__.__name__))
         self._database = None
         self._schema = None
         self._table_name = None
@@ -323,7 +348,7 @@ class Table(Extractable, Loadable, DB, Item):
 
     def configure(self, database=None, schema=None, table_name=None,
                   db_link=None, fetch_size=None, append=None, purge=None):
-        """Configure the Item properties."""
+        """Configure the model properties."""
         self.database = database
         self.schema = schema
         self.table_name = table_name
@@ -397,7 +422,7 @@ class Table(Extractable, Loadable, DB, Item):
         pass
 
     def prepare(self):
-        """Prepare table."""
+        """Prepare model for ETL operation."""
         if self.purge is True:
             logger.debug(f'Table {self.table_name} will be purged')
             if self.db.vendor == 'oracle':
@@ -418,12 +443,12 @@ class Table(Extractable, Loadable, DB, Item):
     pass
 
 
-class SQL(Executable, DB, Item):
-    """Represents SQL script as ETL Item."""
+class SQL(Executable, DB, Model):
+    """Represents SQL script as ETL model."""
 
-    def __init__(self, item_name=None, database=None, text=None, file=None,
+    def __init__(self, model_name=None, database=None, text=None, file=None,
                  parallel=False):
-        super().__init__(name=(item_name or __class__.__name__))
+        super().__init__(name=(model_name or __class__.__name__))
         self.database = database
         self.text = text
         self.file = file
@@ -513,12 +538,12 @@ class SQL(Executable, DB, Item):
     pass
 
 
-class Select(Extractable, DB, Item):
-    """Represents SQL select as ETL Item."""
+class Select(Extractable, DB, Model):
+    """Represents SQL select as ETL model."""
 
-    def __init__(self, item_name=None, database=None, text=None, file=None,
+    def __init__(self, model_name=None, database=None, text=None, file=None,
                  columns=None, alias=None, parallel=False, fetch_size=1000):
-        super().__init__(name=(item_name or __class__.__name__))
+        super().__init__(name=(model_name or __class__.__name__))
         self._database = None
         self._parallel = None
         self._text = None
@@ -682,12 +707,12 @@ class Select(Extractable, DB, Item):
     pass
 
 
-class Insert(Executable, DB, Item):
-    """Represents SQL insert as ETL Item."""
+class Insert(Executable, DB, Model):
+    """Represents SQL insert as ETL model."""
 
-    def __init__(self, item_name=None, database=None, schema=None, table=None,
+    def __init__(self, model_name=None, database=None, schema=None, table=None,
                  select=None, purge=False, append=False, parallel=False):
-        super().__init__(name=(item_name or __class__.__name__))
+        super().__init__(name=(model_name or __class__.__name__))
         self.database = database
         self.schema = schema
         self.table = table
@@ -853,8 +878,8 @@ class Insert(Executable, DB, Item):
         return text
 
     def prepare(self):
-        """Prepare table."""
-        self.logger = self._createlog()
+        """Prepare model for ETL operation."""
+        self.logger = self.createlog()
         if self.purge is True:
             logger.debug(f'Table {self.table} will be purged')
             if self.db.vendor == 'oracle':
@@ -887,32 +912,32 @@ class Insert(Executable, DB, Item):
         query = self.parse()
         logger.info(f'Running SQL query...')
         logger.line(f'-------------------\n{query}\n-------------------')
-        self._startlog(job_id=self.task.job_id,
-                       run_id=self.task.run_id,
-                       task_id=self.task.id,
-                       step_id=step.id,
-                       db_name=self.db.name,
-                       table_name=self.table,
-                       query_text=query)
+        self.startlog(job_id=self.job.id if self.task.job else None,
+                      run_id=self.job.record_id if self.job else None,
+                      task_id=self.task.id,
+                      step_id=step.id,
+                      db_name=self.db.name,
+                      table_name=self.table,
+                      query_text=query)
         try:
             result = conn.execute(query)
         except sa.exc.SQLAlchemyError as error:
-            self._endlog(error_text=error.orig.__str__())
+            self.endlog(error_text=error.orig.__str__())
             logger.info(f'SQL query failed')
             raise error
         else:
-            self._endlog(output_rows=result.rowcount)
+            self.endlog(output_rows=result.rowcount)
             logger.info(f'SQL query completed')
             return result.rowcount
         pass
 
-    def _createlog(self):
-        """Generate special file logger."""
-        return self.task.logging.sql.setup()
+    def createlog(self):
+        """Generate special logger."""
+        return self.pipeline.logging.sql.setup()
 
-    def _startlog(self, job_id=None, run_id=None, task_id=None, step_id=None,
-                  db_name=None, table_name=None, query_text=None):
-        """Start SQL logging."""
+    def startlog(self, job_id=None, run_id=None, task_id=None, step_id=None,
+                 db_name=None, table_name=None, query_text=None):
+        """Start special logging."""
         self.logger.root.table.new()
         self.logger.table(job_id=job_id,
                           run_id=run_id,
@@ -925,9 +950,9 @@ class Insert(Executable, DB, Item):
                           start_date=dt.datetime.now())
         pass
 
-    def _endlog(self, output_rows=None, output_text=None,
+    def endlog(self, output_rows=None, output_text=None,
                 error_code=None, error_text=None):
-        """End SQL logging."""
+        """End special logging."""
         self.logger.table(end_date=dt.datetime.now(),
                           output_rows=output_rows,
                           output_text=output_text,
@@ -938,12 +963,12 @@ class Insert(Executable, DB, Item):
     pass
 
 
-class File(Extractable, Loadable, OS, Item):
-    """Represents file as ETL item."""
+class File(Extractable, Loadable, OS, Model):
+    """Represents file as ETL model."""
 
-    def __init__(self, item_name=None, path=None, file_name=None,
+    def __init__(self, model_name=None, path=None, file_name=None,
                  encoding='utf-8', fetch_size=1000, purge=False):
-        super().__init__(name=(item_name or __class__.__name__))
+        super().__init__(name=(model_name or __class__.__name__))
         self.path = path
         self.file_name = file_name
         self.encoding = encoding
@@ -1024,7 +1049,7 @@ class File(Extractable, Loadable, OS, Item):
         pass
 
     def prepare(self):
-        """Prepare file for ETL operation."""
+        """Prepare model ETL operation."""
         if self.purge is True:
             logger.debug(f'File {self.path} will be completely purged')
             self.delete()
@@ -1034,13 +1059,13 @@ class File(Extractable, Loadable, OS, Item):
 
 
 class CSV(File):
-    """Represents CSV file as ETL Item."""
+    """Represents CSV file as ETL model."""
 
-    def __init__(self, item_name=None, path=None, file_name=None,
+    def __init__(self, model_name=None, path=None, file_name=None,
                  head=True, columns=None, delimiter=';', terminator='\r\n',
                  enclosure=None, trim=False, encoding='utf-8', fetch_size=1000,
                  purge=False):
-        super().__init__(item_name=(item_name or __class__.__name__),
+        super().__init__(model_name=(model_name or __class__.__name__),
                          path=path, file_name=file_name, encoding=encoding,
                          fetch_size=fetch_size, purge=purge)
         self.head = head
@@ -1166,11 +1191,11 @@ class CSV(File):
 
 
 class JSON(File):
-    """Represents JSON file as ETL item."""
+    """Represents JSON file as ETL model."""
 
-    def __init__(self, item_name=None, path=None, file_name=None,
+    def __init__(self, model_name=None, path=None, file_name=None,
                  encoding='utf-8', fetch_size=1000, purge=False):
-        super().__init__(item_name=(item_name or __class__.__name__),
+        super().__init__(model_name=(model_name or __class__.__name__),
                          path=path, file_name=file_name, encoding=encoding,
                          fetch_size=fetch_size, purge=purge)
         pass
@@ -1208,11 +1233,11 @@ class JSON(File):
 
 
 class XML(File):
-    """Represents XML file as ETL item."""
+    """Represents XML file as ETL model."""
 
-    def __init__(self, item_name=None, path=None, file_name=None,
+    def __init__(self, model_name=None, path=None, file_name=None,
                  encoding='utf-8', fetch_size=1000, purge=False):
-        super().__init__(item_name=(item_name or __class__.__name__),
+        super().__init__(model_name=(model_name or __class__.__name__),
                          path=path, file_name=file_name, encoding=encoding,
                          fetch_size=fetch_size, purge=purge)
 
@@ -1258,12 +1283,12 @@ class XML(File):
     pass
 
 
-class Files(Extractable, OS, Item):
-    """Represents file sequence as ETL Item."""
+class Files(Extractable, OS, Model):
+    """Represents file sequence as ETL model."""
 
-    def __init__(self, item_name=None, server='localhost', path=None,
+    def __init__(self, model_name=None, server='localhost', path=None,
                  recursive=None, mask=None, created=None):
-        super().__init__(name=(item_name or __class__.__name__))
+        super().__init__(name=(model_name or __class__.__name__))
         self.server = server
         self.path = path
         self.recursive = recursive
@@ -1435,13 +1460,13 @@ class Files(Extractable, OS, Item):
     pass
 
 
-class FileManager(Loadable, OS, Item):
-    """Represents file manager as ETL Item."""
+class FileManager(Loadable, OS, Model):
+    """Represents file manager as ETL model."""
 
-    def __init__(self, item_name=None, server='localhost', action='copy',
+    def __init__(self, model_name=None, server='localhost', action='copy',
                  dest=None, nodir=False, zip=False, unzip=False,
                  tempname=False):
-        super().__init__(name=(item_name or __class__.__name__))
+        super().__init__(name=(model_name or __class__.__name__))
         self.server = server
         self.action = action
         self.dest = dest
@@ -1468,15 +1493,15 @@ class FileManager(Loadable, OS, Item):
         return self._dest
 
     @dest.setter
-    def dest(self, value):
-        if isinstance(value, (str, list, tuple)) or value is None:
-            if isinstance(value, str):
-                self._dest = [value]
-            elif isinstance(value, list):
-                self._dest = value
-            elif isinstance(value, tuple):
-                self._dest = [item for item in value]
-            elif value is None:
+    def dest(self, values):
+        if isinstance(values, (str, list, tuple)) or values is None:
+            if isinstance(values, str):
+                self._dest = [values]
+            elif isinstance(values, list):
+                self._dest = values
+            elif isinstance(values, tuple):
+                self._dest = [value for value in values]
+            elif values is None:
                 self._dest = []
         pass
 
@@ -1525,15 +1550,14 @@ class FileManager(Loadable, OS, Item):
         pass
 
     def createlog(self):
-        """Generate special file logger."""
-        self.logger = self.task.logging.file.setup()
-        pass
+        """Generate special logger."""
+        return self.pipeline.logging.file.setup()
 
     def startlog(self, step, fileinfo):
-        """Start particular file logging."""
+        """Start special logging."""
         self.logger.root.table.new()
-        self.logger.table(job_id=self.task.job_id,
-                          run_id=self.task.run_id,
+        self.logger.table(job_id=self.job.id if self.job else None,
+                          run_id=self.job.record_id if self.job else None,
                           task_id=self.task.id,
                           step_id=step.id,
                           server=fileinfo['server'].host,
@@ -1544,7 +1568,7 @@ class FileManager(Loadable, OS, Item):
         pass
 
     def endlog(self):
-        """End particular file logging."""
+        """End special logging."""
         self.logger.table(end_date=dt.datetime.now())
         pass
 
@@ -1702,8 +1726,8 @@ class FileManager(Loadable, OS, Item):
         pass
 
     def prepare(self):
-        """Prepare file processing."""
-        self.createlog()
+        """Prepare model for ETL operation."""
+        self.logger = self.createlog()
         pass
 
     def load(self, step, dataset):

@@ -23,16 +23,18 @@ import queue
 import pepperoni as pe
 import sqlalchemy as sa
 
-from .config import config, calendar
-from .config import Logging
-from .logger import logger
 from .db import db
+from .config import config
+from .config import calendar
+from .logger import logger
 
 from .utils import locate
 from .utils import cache, declare
 from .utils import coalesce
 from .utils import to_datetime, to_timestamp
 from .utils import to_process, to_python
+
+from .config import Logging
 
 
 class Scheduler():
@@ -588,7 +590,6 @@ class Job():
         self.start_date = None
         self.end_date = None
         self.status = None
-        # self.data = dict()
         self.data = types.SimpleNamespace()
         self.errors = set()
 
@@ -923,7 +924,7 @@ class Job():
         pass
 
     def _end(self):
-        logger.info(f'{self} ends...')
+        logger.debug(f'{self} ends...')
         self.status = self._done() if not self.errors else self._error()
         self.end_date = dt.datetime.now()
         self.record.write(end_date=self.end_date, status=self.status,
@@ -1075,60 +1076,37 @@ class Job():
         pass
 
 
-class Task():
-    """Represents standalone job task."""
+class Pipeline():
+    """Represents ETL pipeline."""
 
-    def __init__(self, name=None, date=None, logging=None, json=None):
-        self.id = None
-        self.name = name
+    def __init__(self, *nodes, name=None, date=None, logging=None):
+        self.name = name or __class__.__name__
         self.date = date
-        self.job = None
-        self.job_id = None
-        self.run_id = None
-        if Job.exists():
-            job = Job.get()
-            logger.debug(f'Using {job} configuration in {self}...')
-            self.job = job
-            self.name = job.name
-            self.date = job.date
-            self.job_id = job.id
-            self.run_id = job.record_id
-            logger.info(f'{job} configuration is used in {self}')
 
+        self.task = Task()
+        self.steps = {}
+        self.nodes = {}
+        self.threads = []
+
+        self.job = Job.get() if Job.exists() else None
+        if self.job:
+            logger.debug(f'Using {self.job} configuration in {self}...')
+            self.name = self.job.name
+            self.date = self.job.date
         self.logging = logging if isinstance(logging, Logging) else Logging()
-        self.logger = self.logging.task.setup()
-        logger.debug(f'{self.logger.name} is used in {self} logging')
-
-        self.updated = None
-        self.start_date = None
-        self.end_date = None
-        self._status = None
-        self._records_read = 0
-        self._records_written = 0
-        self._records_found = 0
-        self._files_found = 0
-        self._bytes_found = 0
-        self.errors = set()
-
-        self.mode = 'A' if getattr(self.job, 'auto', 0) > 0 else 'M'
-        self.server = platform.node()
-        self.user = os.getlogin()
-        self.file_log = logger.file.path if logger.file.status else None
-
         self.calendar = calendar.Day(self.date)
+        
+        self.task.setup(self)
+        self.add(*nodes)
         pass
 
     def __repr__(self):
-        """Represent task."""
-        if self.id is not None:
-            return f'Task[{self.id}]'
-        else:
-            return 'Task'
-        pass
+        """Represent pipeline with its name."""
+        return self.name
 
     @property
     def name(self):
-        """Get task name."""
+        """Get pipeline name."""
         return self._name
 
     @name.setter
@@ -1141,7 +1119,7 @@ class Task():
 
     @property
     def date(self):
-        """Get task date."""
+        """Get report date."""
         return self._date
 
     @date.setter
@@ -1151,6 +1129,221 @@ class Task():
         else:
             self._date = dt.datetime.now()
         pass
+
+    @property
+    def roots(self):
+        """List all root steps."""
+        return [step for step in self.walk() if not step.a.prev]
+
+    def add(self, *nodes):
+        """Add new pipeline nodes."""
+        self.bind(*nodes)
+        return self.refresh()
+
+    def bind(self, *nodes):
+        """Extend pipeline using nodes listed."""
+        root = self.nodes[0] if self.nodes else None
+        for node in nodes:
+            if not isinstance(node, (Node, list, tuple)):
+                requires = 'Node, list or tupple'
+                class_name = node.__class__.__name__
+                message = (f'argument must be {requires} not {class_name}')
+                raise TypeError(message)
+            elif isinstance(node, (list, tuple)):
+                self.bind(*node)
+                root = None
+            else:
+                node.setup(self, root)
+                root = node
+        return self.nodes
+
+    def refresh(self):
+        """Refresh pipeline structure step by step."""
+        self.steps.clear()
+        nodes = [value for value in self.nodes.values()]
+        for i, a in enumerate(nodes):
+            if not isinstance(a, (list, tuple)) and a.extractable:
+                for b in a.next:
+                    if b.transformable:
+                        for c in b.next:
+                            if c.loadable:
+                                step = Step(a=a, b=b, c=c)
+                                step.setup(self)
+                                a.join(step)
+                    elif b.loadable:
+                        step = Step(a=a, b=b)
+                        step.setup(self)
+                        a.join(step)
+            elif not isinstance(a, (list, tuple)) and a.executable:
+                step = Step(a=a)
+                step.setup(self)
+                if i > 0:
+                    nodes[i-1].join(step)
+        return self.steps
+
+    def walk(self):
+        """Walk through the pipeline plan step by step."""
+        for step in self.steps.values():
+            yield step
+        pass
+
+    def run(self):
+        """Run pipeline."""
+        return self.task.run()
+
+    pass
+
+
+class Process():
+    """Represents base class for pipeline processes."""
+
+    def __repr__(self):
+        """Represent process with its name."""
+        return self.name
+
+    @property
+    def pipeline(self):
+        """Get process pipeline."""
+        return self._pipeline
+
+    @pipeline.setter
+    def pipeline(self, value):
+        if isinstance(value, Pipeline) or value is None:
+            self._pipeline = value
+        else:
+            class_name = value.__class__.__name__
+            message = (f'pipeline must be Pipeline, not {class_name}')
+            raise TypeError(message)
+        pass
+
+    @property
+    def job(self):
+        """Get process job ID."""
+        if self.pipeline and self.pipeline.job:
+                return self.pipeline.job
+
+    @property
+    def process_name(self):
+        """Get process name."""
+        return self._name
+
+    @property
+    def name(self):
+        """Get process name."""
+        return self._name
+
+    @name.setter
+    def name(self, value):
+        if isinstance(value, str):
+            self._name = value
+        else:
+            self._name = None
+        pass
+
+    pass
+
+
+class Unit():
+    """Represents base class for pipeline units."""
+
+    def __repr__(self):
+        """Represent unit with its name."""
+        return self.name
+
+    @property
+    def pipeline(self):
+        """Get unit task."""
+        return self._pipeline
+
+    @pipeline.setter
+    def pipeline(self, value):
+        if isinstance(value, Pipeline) or value is None:
+            self._pipeline = value
+        else:
+            class_name = value.__class__.__name__
+            message = (f'pipeline must be Pipeline, not {class_name}')
+            raise TypeError(message)
+        pass
+
+    @property
+    def job(self):
+        """Get process job ID."""
+        if self.pipeline and self.pipeline.job:
+                return self.pipeline.job
+
+    @property
+    def unit_name(self):
+        """Get unit name."""
+        return self._name
+
+    @property
+    def name(self):
+        """Get unit name."""
+        return self._name
+
+    @name.setter
+    def name(self, value):
+        if isinstance(value, str):
+            self._name = value
+        else:
+            message = f'name must be str, not {value.__class__.__name__}'
+            raise TypeError(message)
+        pass
+
+    @property
+    def seqno(self):
+        """Get unit sequence number."""
+        return self._seqno
+
+    @seqno.setter
+    def seqno(self, value):
+        if isinstance(value, int) or value is None:
+            self._seqno = value
+        else:
+            message = f'seqno must be int, not {value.__class__.__name__}'
+            raise TypeError(message)
+        pass
+
+    def rename(self, new_name):
+        """Change unit name."""
+        self.name = new_name
+        pass
+
+    def renumber(self, new_seqno):
+        """Change unit sequence number."""
+        self.seqno = new_seqno
+        pass
+
+    pass
+
+
+class Task(Process):
+    """Represents pipeline task."""
+
+    def __init__(self, name=None, pipeline=None):
+        self.id = None
+        self.name = name or __class__.__name__
+        if pipeline is not None:
+            self.setup(pipeline)
+
+        self.start_date = None
+        self.end_date = None
+        self._status = None
+        self._records_read = 0
+        self._records_written = 0
+        self._records_found = 0
+        self._files_found = 0
+        self._bytes_found = 0
+        self.errors = set()
+        self.updated = None
+        pass
+
+    def __repr__(self):
+        """Represent task."""
+        if self.id is not None:
+            return f'Task[{self.id}]'
+        else:
+            return 'Task'
 
     @property
     def status(self):
@@ -1227,9 +1420,16 @@ class Task():
             return None
         pass
 
+    def setup(self, pipeline):
+        """Configure the task for the given pipeline."""
+        self.pipeline = pipeline
+        self.logger = self.pipeline.logging.task.setup()
+        logger.debug(f'Logger {self.logger.name} is used in {self} logging')
+        logger.debug(f'{self} configured in {pipeline}')
+        pass
+
     def run(self):
         """Run task."""
-        logger.line('-------------------')
         self._prepare()
         self._start()
         try:
@@ -1237,7 +1437,6 @@ class Task():
         except Exception:
             self._fail()
         self._end()
-        logger.line('-------------------')
         return self.result()
 
     def prepare(self):
@@ -1249,7 +1448,18 @@ class Task():
         pass
 
     def execute(self):
-        """Execute task."""
+        """Execute pipeline task from the very first pipeline steps."""
+        for step in self.pipeline.roots:
+            logger.debug(f'Found {step} in roots in {self} for execution')
+            step.to_thread()
+        return self.wait()
+
+    def wait(self):
+        """Wait until all pipeline threads are finished."""
+        for thread in self.pipeline.threads:
+            logger.debug(f'Waiting for {thread.name} in {self} to finish...')
+            thread.join()
+            logger.debug(f'{thread.name} in {self} finished')
         pass
 
     def fail(self):
@@ -1280,19 +1490,16 @@ class Task():
             select = f'SELECT * FROM {table} WHERE id = {self.id}'
             logger.info(f'{self} DB query: {select}')
         self.logger.table(start_date=self.start_date,
-                          job_id=self.job_id,
-                          run_id=self.run_id,
-                          task_date=self.date,
-                          **{key: value for key, value in self.__dict__.items()
-                             if key in self.logging.task.optional
-                             and self.logging.task.fields[key] is True})
+                          job_id=self.job.id if self.job else None,
+                          run_id=self.job.record_id if self.job else None,
+                          task_name=self.name,
+                          task_date=self.pipeline.date)
         atexit.register(self._exit)
         logger.debug(f'{self} started')
         return self.start()
 
     def _execute(self):
-        logger.info(f'Executing {self}...')
-        logger.info(f'{self} steps: {[s.graph for s in self.steps.values()]}')
+        logger.info(f'{self} running')
         self.status = 'R'
         return self.execute()
 
@@ -1316,15 +1523,15 @@ class Task():
         elif self.status == 'E':
             if self.logging.task.fields.get('text_error'):
                 self.logger.table(text_error=self.text_error)
-        logger.info(f'{self} ended')
+        logger.debug(f'{self} ended')
         return self.end()
 
     def _done(self):
-        logger.info(f'{self} executed')
+        logger.info(f'{self} done')
         return 'D'
 
     def _error(self):
-        logger.info(f'{self} executed with error')
+        logger.info(f'{self} failed')
         return 'E'
 
     def _exit(self):
@@ -1333,218 +1540,32 @@ class Task():
             if self.status not in ('D', 'E'):
                 logger.debug(f'Caught unexpected end in {self}')
                 self.status = 'U'
-        logger.debug(f'{self} exit performed')
         pass
 
     pass
 
 
-class Element():
-    """Represents task elements."""
+class Step(Process, Unit):
+    """Represents task step."""
 
-    def __repr__(self):
-        """Represent element with its name."""
-        return self.name
-
-    @property
-    def task(self):
-        """Get element task."""
-        return self._task
-
-    @task.setter
-    def task(self, value):
-        """Set element task."""
-        if isinstance(value, Pipeline) or value is None:
-            self._task = value
-        else:
-            message = (f'task must be Task, not {value.__class__.__name__}')
-            raise TypeError(message)
-        pass
-
-    @property
-    def name(self):
-        """Get element name."""
-        return self._name
-
-    @name.setter
-    def name(self, value):
-        """Set element name."""
-        if isinstance(value, str):
-            self._name = value
-        else:
-            message = f'name must be str, not {value.__class__.__name__}'
-            raise TypeError(message)
-        pass
-
-    @property
-    def seqno(self):
-        """Get element sequence number."""
-        return self._seqno
-
-    @seqno.setter
-    def seqno(self, value):
-        """Set element sequence number."""
-        if isinstance(value, int) or value is None:
-            self._seqno = value
-        else:
-            message = f'seqno must be int, not {value.__class__.__name__}'
-            raise TypeError(message)
-        pass
-
-    def rename(self, new_name):
-        """Change element name."""
-        self.name = new_name
-        pass
-
-    def sort(self, new_seqno):
-        """Change element sequence number."""
-        self.seqno = new_seqno
-        pass
-
-    def attach(self, task):
-        """Assign element to the task passed as argument."""
-        self.task = task
-        pass
-
-    pass
-
-
-class Pipeline(Task):
-    """Represents ETL pipeline."""
-
-    def __init__(self, *items, name=None, date=None, logging=None, json=None):
-        super().__init__(name=name, date=date, logging=logging, json=json)
-        self.items = {}
-        self.steps = {}
-        self.threads = []
-        self.add(*items)
-        pass
-
-    @property
-    def roots(self):
-        """List all root steps."""
-        return [step for step in self.walk() if not step.a.prev]
-
-    def add(self, *items, refresh=True):
-        """Add new pipeline items."""
-        logger.debug(f'Adding following items to {self}: {items}')
-        root = list(self.items)[0] if self.items else None
-        for i, item in enumerate(items):
-            logger.debug(f'Now {item} will be added to {self}...')
-            if not isinstance(item, (Item, list, tuple)):
-                message = (f'item must be Item, list or tupple'
-                           f'not {item.__class__.__name__}')
-                raise TypeError(message)
-            elif isinstance(item, (list, tuple)):
-                self.add(*item, refresh=False)
-                root = None
-            else:
-                item.attach(self, root=root)
-                root = item
-        logger.debug(f'Items {items} added to {self}')
-        return self.refresh() if refresh is True else None
-
-    def refresh(self):
-        """Refresh pipeline steps."""
-        logger.debug(f'Generating steps for {self}...')
-        items = [value for value in self.items.values()]
-        for key in [key for key in self.steps]:
-            self.steps.pop(key)
-        for i, a in enumerate(items):
-            if not isinstance(a, (list, tuple)) and a.extractable:
-                for b in a.next:
-                    if b.transformable:
-                        for c in b.next:
-                            if c.loadable:
-                                step = Step(a=a, b=b, c=c)
-                                step.attach(self)
-                                a.join(step)
-                    elif b.loadable:
-                        step = Step(a=a, b=b)
-                        step.attach(self)
-                        a.join(step)
-            elif not isinstance(a, (list, tuple)) and a.executable:
-                step = Step(a=a)
-                step.attach(self)
-                if i > 0:
-                    items[i-1].join(step)
-        logger.debug(f'Steps for {self} genererated')
-        return self.steps
-
-    def walk(self):
-        """Walk through the pipeline steps one by one."""
-        for step in self.steps.values():
-            yield step
-        pass
-
-    def execute(self):
-        """Run all pipeline steps."""
-        for step in self.roots:
-            logger.debug(f'Found {step} in roots of {self}')
-            self.to_thread(step)
-        return self.wait()
-
-    def to_thread(self, step):
-        """Create new thread for step execution."""
-        logger.debug(f'Creating thread for {step} in {self}...')
-        name = f'StepThread-{step.seqno}'
-        target = step.run
-        step.thread = th.Thread(name=name, target=target, daemon=True)
-        logger.debug(f'Created {step.thread.name} for {step} in {self}')
-        self.threads.append(step.thread)
-        logger.debug(f'Starting {step.thread.name}...')
-        return step.thread.start()
-
-    def wait(self):
-        """Wait until all threads are finished."""
-        for thread in self.threads:
-            logger.debug(f'Waiting for {thread.name} of {self} to finish...')
-            thread.join()
-            logger.debug(f'{thread.name} of {self} finished')
-        pass
-
-    pass
-
-
-class Component(Element):
-    """Represents pipeline component."""
-
-    @property
-    def pipeline(self):
-        """Get element pipeline (task)."""
-        return self.task
-
-    @pipeline.setter
-    def pipeline(self, value):
-        """Set element pipeline (task)."""
-        self.task = value
-        pass
-
-    pass
-
-
-class Step(Component):
-    """Represents single pipeline step."""
-
-    def __init__(self, name=None, seqno=None, a=None, b=None, c=None,
-                 pipeline=None):
+    def __init__(self, name=None, a=None, b=None, c=None, pipeline=None):
         self.id = None
         self.name = name or __class__.__name__
-        self.seqno = seqno
+        self.seqno = None
         self.thread = None
         self.threads = []
         self.queue = queue.Queue()
         self.input = queue.Queue()
         self.output = queue.Queue()
 
-        assert a is None or isinstance(a, Item)
+        assert a is None or isinstance(a, Node)
         self.a = a
-        assert b is None or isinstance(b, Item)
+        assert b is None or isinstance(b, Node)
         self.b = b
-        assert c is None or isinstance(c, Item)
+        assert c is None or isinstance(c, Node)
         self.c = c
         if pipeline is not None:
-            self.attach(pipeline)
+            self.setup(pipeline)
 
         self.start_date = None
         self.end_date = None
@@ -1555,11 +1576,7 @@ class Step(Component):
         self._result_value = 0
         self._result_long = 0
         self.errors = set()
-
-        self.mode = None
-        self.server = platform.node()
-        self.user = os.getlogin()
-        self.file_log = logger.file.path if logger.file.status else None
+        self.updated = None
         pass
 
     def __repr__(self):
@@ -1568,16 +1585,14 @@ class Step(Component):
             return f'{self.name}[{self.id}]'
         else:
             return self.name
-        pass
 
     @property
     def step_name(self):
-        """Get item name."""
+        """Get step name."""
         return self.name
 
     @step_name.setter
     def step_name(self, value):
-        """Set item name."""
         self.rename(value)
         pass
 
@@ -1592,7 +1607,6 @@ class Step(Component):
             return 'ETL'
         else:
             return None
-        pass
 
     @property
     def graph(self):
@@ -1605,7 +1619,6 @@ class Step(Component):
             return f'{self.a}-->{self.b}-->{self.c}'
         else:
             return None
-        pass
 
     @property
     def first(self):
@@ -1621,7 +1634,6 @@ class Step(Component):
             return self.b
         else:
             return self.c
-        pass
 
     @property
     def status(self):
@@ -1649,7 +1661,7 @@ class Step(Component):
     def records_read(self, value):
         if isinstance(value, int):
             self._records_read += value
-            self.pipeline.records_read = value
+            self.task.records_read = value
             self.logger.table(records_read=self.records_read)
         pass
 
@@ -1662,7 +1674,7 @@ class Step(Component):
     def records_written(self, value):
         if isinstance(value, int):
             self._records_written += value
-            self.pipeline.records_written = value
+            self.task.records_written = value
             self.logger.table(records_written=self.records_written)
         pass
 
@@ -1675,7 +1687,7 @@ class Step(Component):
     def result_value(self, value):
         if isinstance(value, int):
             self._result_value = value
-            self.pipeline.result_value = value
+            self.task.result_value = value
             self.logger.table(result_value=self.result_value)
         pass
 
@@ -1688,7 +1700,7 @@ class Step(Component):
     def result_long(self, value):
         if isinstance(value, (list, tuple, dict, str)):
             self._result_long = value
-            self.pipeline.result_long = value
+            self.task.result_long = value
             self.logger.table(result_long=str(self.result_long))
         pass
 
@@ -1699,7 +1711,6 @@ class Step(Component):
             return True
         else:
             return False
-        pass
 
     @property
     def transformation(self):
@@ -1708,7 +1719,6 @@ class Step(Component):
             return True
         else:
             return False
-        pass
 
     @property
     def loading(self):
@@ -1719,7 +1729,6 @@ class Step(Component):
             return True
         else:
             return False
-        pass
 
     @property
     def text_error(self):
@@ -1729,16 +1738,16 @@ class Step(Component):
             return ''.join(tb.format_exception(err_type, err_value, err_tb))
         else:
             return None
-        pass
 
-    def attach(self, pipeline):
-        """Attach step to the pipeline passed as argument."""
+    def setup(self, pipeline):
+        """Configure the step for the given pipeline."""
         self.pipeline = pipeline
+        self.task = pipeline.task
         name = Step.__name__
         seqno = 1
         while True:
             if self.pipeline.steps.get(name) is None:
-                self.sort(seqno)
+                self.renumber(seqno)
                 if seqno > 1:
                     self.rename(name)
                 break
@@ -1752,16 +1761,13 @@ class Step(Component):
                 seqno += 1
                 name = f'{self.name}-{seqno}'
         self.pipeline.steps[name] = self
-        self.date = self.pipeline.date
-        self.mode = self.pipeline.mode
-        self.logging = self.pipeline.logging
         self.logger = self.pipeline.logging.step.setup(self)
-        logger.debug(f'{self.logger.name} is used in {self} logging')
-        logger.debug(f'{self}: {self.graph} - attached to {pipeline}')
+        logger.debug(f'Logger {self.logger.name} is used in {self} logging')
+        logger.debug(f'{self} {self.graph} configured in {pipeline}')
         pass
 
     def run(self):
-        """Run step."""
+        """Run this step."""
         self._start()
         try:
             self._execute()
@@ -1770,11 +1776,21 @@ class Step(Component):
         self._end()
         return self.resume()
 
+    def to_thread(self):
+        """Run this step in a separate thread."""
+        logger.debug(f'Creating thread for {self} in {self.task}...')
+        name = f'StepThread-{self.seqno}'
+        self.thread = th.Thread(name=name, target=self.run, daemon=True)
+        logger.debug(f'Created {self.thread.name} for {self} in {self.task}')
+        self.pipeline.threads.append(self.thread)
+        logger.debug(f'Starting {self.thread.name}...')
+        return self.thread.start()
+
     def resume(self):
-        """Proceed execution by running all joined steps."""
+        """Proceed task execution in threads of following steps."""
         if self.status == 'D':
             for step in self.last.joins:
-                self.pipeline.to_thread(step)
+                step.to_thread()
         pass
 
     def _start(self):
@@ -1787,26 +1803,23 @@ class Step(Component):
             select = f'SELECT * FROM {table} WHERE id = {self.id}'
             logger.info(f'{self} DB query: {select}')
         self.logger.table(start_date=self.start_date,
-                          task_id=self.task.id,
-                          job_id=self.task.job_id,
-                          run_id=self.task.run_id,
+                          job_id=self.job.id if self.job else None,
+                          run_id=self.job.record_id if self.job else None,
+                          task_id=self.pipeline.task.id,
                           step_name=self.name,
                           step_type=self.type,
-                          step_date=self.date,
-                          **{key: value for key, value in self.__dict__.items()
-                             if key in self.logging.step.optional
-                             and self.logging.step.fields[key] is True})
+                          step_date=self.pipeline.date)
         if self.a is not None:
-            self.logger.table(step_a=self.a.item_name)
+            self.logger.table(step_a=self.a.node_name)
             if self.b is not None:
-                self.logger.table(step_b=self.b.item_name)
+                self.logger.table(step_b=self.b.node_name)
                 if self.c is not None:
-                    self.logger.table(step_c=self.c.item_name)
+                    self.logger.table(step_c=self.c.node_name)
         logger.debug(f'{self} started')
         return atexit.register(self._exit)
 
     def _execute(self):
-        logger.info(f'Executing {self}...')
+        logger.info(f'{self} running')
         logger.info(f'{self} is {self.type} operation: {self.graph}')
         self.status = 'R'
         if self.type == 'ETL':
@@ -1834,10 +1847,10 @@ class Step(Component):
     def __fail(self):
         exc_info = sys.exc_info()
         self.errors.add(exc_info)
-        if self.task is not None:
-            self.task.errors.add(exc_info)
-            if self.task.job is not None:
-                self.task.job.errors.add(exc_info)
+        if self.pipeline:
+            self.pipeline.task.errors.add(exc_info)
+            if self.pipeline.job:
+                self.pipeline.job.errors.add(exc_info)
         pass
 
     def _end(self):
@@ -1849,15 +1862,15 @@ class Step(Component):
         elif self.status == 'E':
             if self.logging.step.fields.get('text_error'):
                 self.logger.table(text_error=self.text_error)
-        logger.info(f'{self} ended')
+        logger.debug(f'{self} ended')
         pass
 
     def _done(self):
-        logger.info(f'{self} executed')
+        logger.info(f'{self} done')
         return 'D'
 
     def _error(self):
-        logger.info(f'{self} executed with error')
+        logger.info(f'{self} failed')
         return 'E'
 
     def _exit(self):
@@ -1866,104 +1879,101 @@ class Step(Component):
             if self.status not in ('D', 'E'):
                 logger.debug(f'Caught unexpected end in {self}')
                 self.status = 'U'
-        logger.debug(f'{self} exit performed')
         pass
 
     pass
 
 
-class Item(Component):
-    """Represents single pipeline item."""
-
-    extractable = False
-    transformable = False
-    loadable = False
-    executable = False
+class Node(Unit):
+    """Represents task node."""
 
     def __init__(self, name=None, seqno=None, pipeline=None):
         self.name = name or __class__.__name__
         self.seqno = seqno
         self.thread = None
-        self.pipeline = pipeline
+        if pipeline:
+            self.setup(pipeline)
+
+        self.steps = []
         self._prev = []
         self._next = []
-        self._steps = []
         pass
 
     @property
-    def item_name(self):
-        """Get item name."""
+    def node_name(self):
+        """Get node name."""
         return self.name
 
-    @item_name.setter
-    def item_name(self, value):
-        """Set item name."""
+    @node_name.setter
+    def node_name(self, value):
         self.name = value
         pass
 
     @property
     def prev(self):
-        """List all connected items that precede this one."""
+        """List all connected nodes that precede this one."""
         return self._prev
 
     @prev.setter
-    def prev(self, item):
-        """Connect the item as a preceding to this one."""
-        if isinstance(item, Item) and item not in self._prev:
-            self._prev.append(item)
-            item.next = self
+    def prev(self, node):
+        """Connect the node as a preceding to this one."""
+        if isinstance(node, Node) and node not in self._prev:
+            self._prev.append(node)
+            node.next = self
         pass
 
     @property
     def next(self):
-        """List all connected items that proceed this one."""
+        """List all connected nodes that proceed this one."""
         return self._next
 
     @next.setter
-    def next(self, item):
-        """Connect the item as a proceeding to this one."""
-        if isinstance(item, Item) and item not in self._next:
-            self._next.append(item)
+    def next(self, node):
+        """Connect the node as a proceeding to this one."""
+        if isinstance(node, Node) and node not in self._next:
+            self._next.append(node)
         pass
 
     @property
     def joins(self):
-        """List all steps where the item is a join."""
-        return self._steps
+        """List all steps where the node is a join."""
+        return self.steps
 
-    def attach(self, pipeline, root=None):
-        """Assign item to the pipeline passed as argument."""
+    def setup(self, pipeline, root):
+        """Configure the node using given pipeline."""
         self.pipeline = pipeline
+        self.task = pipeline.task
         self.prev = root
         name = self.name
         seqno = 1
         while True:
-            if self.pipeline.items.get(name) is None:
-                self.sort(seqno)
+            if self.pipeline.nodes.get(name) is None:
+                self.renumber(seqno)
                 if seqno > 1:
                     self.rename(name)
                 break
-            elif self.pipeline.items.get(name) == self:
+            elif self.pipeline.nodes.get(name) == self:
                 return
             else:
                 seqno += 1
                 name = f'{self.name}-{seqno}'
-        self.pipeline.items[name] = self
-        logger.debug(f'{self} attached to {pipeline}')
+        self.pipeline.nodes[name] = self
+        logger.debug(f'Node {self} configured in {pipeline}')
         pass
 
     def join(self, step):
-        """Make item a join between current step and following steps."""
+        """Make this node a join between the given and following steps."""
         if isinstance(step, Step):
-            if step not in self._steps:
-                self._steps.append(step)
+            if step not in self.steps:
+                self.steps.append(step)
         else:
             message = (f'step must be Step, not {step.__class__.__name__}')
             raise TypeError(message)
         pass
 
     def prepare(self):
-        """Prepare Item."""
+        """Prepare this node."""
         pass
 
     pass
+

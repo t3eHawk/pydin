@@ -1,11 +1,15 @@
 """Utilits."""
 
-import datetime as dt
-import importlib as imp
+
 import os
-import re
-import subprocess as sp
 import sys
+
+import re
+import datetime as dt
+
+import threading as th
+import subprocess as sp
+import importlib as imp
 
 import sqlparse
 
@@ -155,6 +159,12 @@ def to_process(exe, file=None, args=None, env=None, devnull=False, spawn=True):
         kwargs['creationflags'] = sp.CREATE_NO_WINDOW
     proc = sp.Popen(command, **kwargs)
     return proc
+
+
+def to_thread(name, function):
+    """Initialize and return a new thread using given parameters."""
+    thread = th.Thread(name=name, target=function, daemon=True)
+    return thread
 
 
 def to_python(file, args=None):

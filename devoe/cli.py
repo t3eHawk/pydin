@@ -7,9 +7,10 @@ import re
 import subprocess as sp
 import sys
 
-from .api import Operator
-from .config import config
+from .api import Driver
+
 from .db import db
+from .config import config
 from .logger import logger
 from .utils import locate
 
@@ -19,7 +20,7 @@ class Manager():
 
     def __init__(self):
         self.root = locate()
-        self.operator = Operator()
+        self.driver = Driver()
 
         args = self._parse_arguments()
         self.sure = args.sure
@@ -107,13 +108,13 @@ class Manager():
         print('Please follow the steps to create the scheduler.')
         name = input('Enter the name or leave empty:\n')
         desc = input('Enter the description or leave empty:\n')
-        self.operator.create_scheduler(name=name, desc=desc)
+        self.driver.create_scheduler(name=name, desc=desc)
         print('Scheduler created in current location.')
         pass
 
     def start_scheduler(self):
         """Start scheduler."""
-        pid = self.operator.start_scheduler()
+        pid = self.driver.start_scheduler()
         if pid is not None:
             print(f'Scheduler started (PID {pid}).')
         else:
@@ -122,7 +123,7 @@ class Manager():
 
     def stop_scheduler(self):
         """Stop scheduler."""
-        self.operator.stop_scheduler()
+        self.driver.stop_scheduler()
         print('Scheduler stopped.')
         pass
 
@@ -135,7 +136,7 @@ class Manager():
 
     def report_scheduler(self):
         """Show current scheduler status."""
-        pid = self.operator.report_scheduler()
+        pid = self.driver.report_scheduler()
         if pid is not None:
             print(f'Scheduler is running (PID {pid}).')
         else:
@@ -154,9 +155,9 @@ class Manager():
         if sure == 'Y':
             print('Creating job...')
             if scenario is None:
-                id = self.operator.create_job(**configuration)
+                id = self.driver.create_job(**configuration)
             elif scenario == 'default':
-                id = self.operator.create_job()
+                id = self.driver.create_job()
             print(f'Job created (ID {id}).')
         else:
             print('Operation canceled.')
@@ -174,7 +175,7 @@ class Manager():
 
         if sure == 'Y':
             print('Editing job...')
-            self.operator.configure_job(id, **configuration)
+            self.driver.configure_job(id, **configuration)
             print('Job edited.')
         else:
             print('Operation canceled.')
@@ -197,7 +198,7 @@ class Manager():
     def enable_job(self, id):
         """Activate job."""
         id = self._check_id(id)
-        result = self.operator.enable_job(id)
+        result = self.driver.enable_job(id)
         if result is True:
             print(f'Job enabled (ID {id}).')
         else:
@@ -207,7 +208,7 @@ class Manager():
     def disable_job(self, id):
         """Deactivate job."""
         id = self._check_id(id)
-        result = self.operator.disable_job(id)
+        result = self.driver.disable_job(id)
         if result is True:
             print(f'Job disabled (ID {id}).')
         else:
@@ -224,7 +225,7 @@ class Manager():
         if sure is True:
             print(f'{repr} delete confirmed.')
             try:
-                self.operator.delete_job(id)
+                self.driver.delete_job(id)
             except Exception:
                 print(f'{repr} deleted with errors.')
             else:
@@ -236,7 +237,7 @@ class Manager():
     def list_jobs(self, id=None):
         """Show all scheduled jobs."""
         id = self._check_id(id) if id is not None else id
-        jobs = list(self.operator.list_jobs(id=id))
+        jobs = list(self.driver.list_jobs(id=id))
         row = '{id:<5}|{name:<30}|{desc:<30}|{status:<6}|'
         head = row.format(id='ID', name='NAME', desc='DESC', status='STATUS')
         border = 75*'-'
@@ -289,7 +290,7 @@ class Manager():
                     sure = True if sure == 'Y' else False
                     break
         if sure is True:
-            proc = self.operator.run_job(id, wait=False, **kwargs)
+            proc = self.driver.run_job(id, wait=False, **kwargs)
             now = dt.datetime.now()
             date = '%Y-%m-%d %H:%M:%S'
             print(f'{repr} started (PID {proc.pid}, {now:{date}}).')
@@ -341,7 +342,7 @@ class Manager():
                     sure = True if sure == 'Y' else False
                     break
         if sure is True:
-            self.operator.cancel_job(id)
+            self.driver.cancel_job(id)
             print(f'All {repr} runs canceled.')
         pass
 
@@ -356,7 +357,7 @@ class Manager():
                     sure = True if sure == 'Y' else False
                     break
         if sure is True:
-            self.operator.cancel_jobs()
+            self.driver.cancel_jobs()
             print(f'All jobs canceled.')
         pass
 
@@ -373,13 +374,13 @@ class Manager():
                     sure = True if sure == 'Y' else False
                     break
         if sure is True:
-            self.operator.cancel_run(id)
+            self.driver.cancel_run(id)
             print(f'{repr} canceled.')
         pass
 
     def create_config(self):
         """Create global configuration file."""
-        config_path = self.operator.create_config()
+        config_path = self.driver.create_config()
         if config_path is not None:
             print(f'Global config created ({config_path}).')
         else:
@@ -416,7 +417,7 @@ class Manager():
                     sure = True if sure == 'Y' else False
                     break
         if sure is True:
-            self.operator.create_repo(url=url)
+            self.driver.create_repo(url=url)
             print('Job repository successfully created.')
         pass
 
@@ -431,11 +432,11 @@ class Manager():
                     sure = True if sure == 'Y' else False
                     break
         if sure is True:
-            self.operator.pull_repo()
+            self.driver.pull_repo()
             kwargs = {}
             if id is not None:
                 kwargs['id'] = int(id)
-            self.operator.push_repo(**kwargs)
+            self.driver.push_repo(**kwargs)
             print('Job repository successfully synchronized.')
         pass
 

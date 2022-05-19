@@ -20,7 +20,7 @@ from .utils import locate
 from .wrap import check_repo
 
 
-class Operator():
+class Driver():
     """Represents application Python API."""
 
     def __init__(self, root=None):
