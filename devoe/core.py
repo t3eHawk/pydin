@@ -524,7 +524,7 @@ class Scheduler():
         number = config['SCHEDULER'].get('chargers')
         target = self._charger
         for i in range(number):
-            name = f'ChargerThread-{i}'
+            name = f'Charger-{i}'
             thread = th.Thread(name=name, target=target, daemon=True)
             thread.start()
             self.chargers.append(thread)
@@ -533,7 +533,7 @@ class Scheduler():
         number = config['SCHEDULER'].get('executors')
         target = self._executor
         for i in range(number):
-            name = f'ExecutorThread-{i}'
+            name = f'Executor-{i}'
             thread = th.Thread(name=name, target=target, daemon=True)
             thread.start()
             self.executors.append(thread)
@@ -1488,7 +1488,7 @@ class Task(Process):
         if self.id is not None:
             table = self.logger.root.table.proxy
             select = f'SELECT * FROM {table} WHERE id = {self.id}'
-            logger.info(f'{self} DB query: {select}')
+            logger.debug(f'{self} DB query: {select}')
         self.logger.table(start_date=self.start_date,
                           job_id=self.job.id if self.job else None,
                           run_id=self.job.record_id if self.job else None,
@@ -1779,7 +1779,7 @@ class Step(Process, Unit):
     def to_thread(self):
         """Run this step in a separate thread."""
         logger.debug(f'Creating thread for {self} in {self.task}...')
-        name = f'StepThread-{self.seqno}'
+        name = f'Step-{self.seqno}'
         self.thread = th.Thread(name=name, target=self.run, daemon=True)
         logger.debug(f'Created {self.thread.name} for {self} in {self.task}')
         self.pipeline.threads.append(self.thread)
@@ -1801,7 +1801,7 @@ class Step(Process, Unit):
         if self.id is not None:
             table = self.logger.root.table.proxy
             select = f'SELECT * FROM {table} WHERE id = {self.id}'
-            logger.info(f'{self} DB query: {select}')
+            logger.debug(f'{self} DB query: {select}')
         self.logger.table(start_date=self.start_date,
                           job_id=self.job.id if self.job else None,
                           run_id=self.job.record_id if self.job else None,

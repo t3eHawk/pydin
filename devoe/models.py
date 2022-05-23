@@ -59,7 +59,7 @@ class Extractable():
 
     def to_extractor(self, step, queue):
         """Start model extractor."""
-        name = f'{step.thread.name}-Extractor'
+        name = f'{self}-Extractor'
         target = dict(target=self.extractor, args=(step, queue))
         self.thread = th.Thread(name=name, **target, daemon=True)
         step.threads.append(self.thread)
@@ -72,7 +72,8 @@ class Extractable():
         for dataset in self.extract(step):
             try:
                 queue.put(dataset)
-                step.records_read = len(dataset)
+                count = len(dataset)
+                step.records_read = count
                 logger.info(f'{step.records_read} records read')
             except Exception:
                 logger.error()
@@ -88,7 +89,7 @@ class Transformable():
 
     def to_transformer(self, step, input, output):
         """Start model transformer."""
-        name = f'{step.thread.name}-Transformer'
+        name = f'{self}-Transformer'
         target = dict(target=self.transformator, args=(step, input, output))
         self.thread = th.Thread(name=name, **target, daemon=True)
         step.threads.append(self.thread)
@@ -98,7 +99,7 @@ class Transformable():
     def transformator(self, step, input, output):
         """Transform data."""
         logger.info(f'Processing records of {self}...')
-        processed = 0
+        records_processed = 0
         while True:
             if input.empty() is True:
                 if step.extraction is True:
@@ -113,8 +114,9 @@ class Transformable():
                     logger.error()
                 else:
                     output.put(outputs)
-                    processed += len(outputs)
-                    logger.info(f'{processed} records processed')
+                    count = len(outputs)
+                    records_processed += count
+                    logger.info(f'{records_processed} records processed')
                     input.task_done()
         pass
 
@@ -128,7 +130,7 @@ class Loadable():
 
     def to_loader(self, step, queue):
         """Start model loader."""
-        name = f'{step.thread.name}-Loader'
+        name = f'{self}-Loader'
         target = dict(target=self.loader, args=(step, queue))
         self.thread = th.Thread(name=name, **target, daemon=True)
         step.threads.append(self.thread)
@@ -151,7 +153,8 @@ class Loadable():
                 except Exception:
                     logger.error()
                 else:
-                    step.records_written = len(coalesce(result, dataset))
+                    count = len(coalesce(result, dataset))
+                    step.records_written = count
                     logger.info(f'{step.records_written} records written')
                     queue.task_done()
         pass
@@ -166,7 +169,7 @@ class Executable():
 
     def to_executor(self, step):
         """Start model executor."""
-        name = f'{step.thread.name}-Executor'
+        name = f'{self}-Executor'
         target = dict(target=self.executor, args=(step,))
         self.thread = th.Thread(name=name, **target, daemon=True)
         step.threads.append(self.thread)
