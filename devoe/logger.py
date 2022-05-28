@@ -6,7 +6,7 @@ from .config import config
 
 
 logger = pe.logger('devoe.core.logger',
-                   format='{isodate}\t{thread:<20}\t{rectype}\t{message}\n',
+                   format='{isodate}\t{thread:<16}\t{rectype}\t{message}\n',
                    console=config['LOGGING'].get('console'),
                    file=config['LOGGING'].get('file'),
                    info=config['LOGGING'].get('info'),

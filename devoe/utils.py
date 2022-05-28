@@ -13,8 +13,6 @@ import importlib as imp
 
 import sqlparse
 
-from .logger import logger
-
 
 def locate():
     """Get current location and move to it.
@@ -138,7 +136,7 @@ def to_datetime(value):
 
 def to_process(exe, file=None, args=None, env=None, devnull=False, spawn=True):
     """Run the command in a separate process."""
-    logger.debug(f'Making process from {exe=}, {file=}, {args=}')
+    # logger.debug(f'Making process from {exe=}, {file=}, {args=}')
     command = []
     if re.match(r'^.*(\\|/).*$', exe) is not None:
         exe = os.path.abspath(exe)
@@ -150,7 +148,7 @@ def to_process(exe, file=None, args=None, env=None, devnull=False, spawn=True):
         if isinstance(args, str) is True:
             args = args.split()
         command.extend(args)
-    logger.debug(f'{command=}')
+    # logger.debug(f'{command=}')
     kwargs = {}
     kwargs['env'] = env
     kwargs['stdout'] = sp.DEVNULL if devnull is True else sp.PIPE
@@ -180,3 +178,21 @@ def to_sql(text):
                              identifier_case='lower',
                              reindent_aligned=True)
     return result
+
+
+def is_path(string):
+    """Check whether given string is a path or not."""
+    if string is None:
+        return False
+    elif os.path.exists(string):
+        return True
+    elif string.startswith('/'):
+        return True
+    elif string[1:].startswith(':\\'):
+        return True
+    elif '/' in string:
+        return True
+    elif '\\' in string:
+        return True
+    else:
+        return False

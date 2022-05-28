@@ -28,15 +28,20 @@ from .core import Node
 
 
 class Model(Node):
-    """Represents single pipeline model."""
+    """Represents single pipeline ETL model."""
 
     extractable = False
     transformable = False
     loadable = False
     executable = False
 
-    def __init__(self, name=None):
-        super().__init__(name=(name or __class__.__name__))
+    def __init__(self, *args, model_name=None, source_name=None,
+                 chunk_size=1000, cleanup=False, key_field=None, **kwargs):
+        super().__init__(node_name=model_name, source_name=source_name)
+        self.chunk_size = chunk_size
+        self.cleanup = cleanup
+        self.key_field = key_field
+        self.configure(*args, **kwargs)
         pass
 
     @property
@@ -48,6 +53,43 @@ class Model(Node):
     def model_name(self, value):
         self.name = value
         pass
+
+    def configure(self):
+        """Configure this ETL model."""
+        if self:
+            raise NotImplemented
+
+    def prepare(self):
+        """Do something with this ETL model before run."""
+        pass
+
+    def release(self):
+        """Do something with this ETL model after run."""
+        pass
+
+    def create(self):
+        """Create corresponding object in the data source."""
+        if self:
+            raise NotImplemented
+
+    def remove(self):
+        """Remove corresponding object from the data source."""
+        if self:
+            raise NotImplemented
+
+    def clean(self):
+        """Clean all data in the corresponding object."""
+        if self:
+            raise NotImplemented
+
+    def explain(self, parameter_name=None):
+        """Get model or chosen parameter description."""
+        if not parameter_name:
+            return self.__doc__
+        else:
+            attribute = getattr(self, parameter_name)
+            if attribute:
+                return attribute.__doc__
 
     pass
 
@@ -78,6 +120,10 @@ class Extractable():
             except Exception:
                 logger.error()
         pass
+
+    def extract(self):
+        if self:
+            raise NotImplemented
 
     pass
 
@@ -120,6 +166,10 @@ class Transformable():
                     input.task_done()
         pass
 
+    def transform(self):
+        if self:
+            raise NotImplemented
+
     pass
 
 
@@ -159,6 +209,10 @@ class Loadable():
                     queue.task_done()
         pass
 
+    def load(self):
+        if self:
+            raise NotImplemented
+
     pass
 
 
@@ -188,51 +242,9 @@ class Executable():
             logger.error()
         pass
 
-    pass
-
-
-class DB():
-    """Represents base class for all DB items."""
-
-    @property
-    def db(self):
-        """Get database object (short)."""
-        return self._database
-
-    @property
-    def database(self):
-        """Get database object."""
-        return self._database
-
-    @database.setter
-    def database(self, value):
-        if isinstance(value, Database):
-            self._database = value
-        elif isinstance(value, str):
-            self._database = connector.receive(value)
-        pass
-
-    pass
-
-
-class OS():
-    """Represents base class for all OS items."""
-
-    @property
-    def server(self):
-        """Get server object."""
-        return self._server
-
-    @server.setter
-    def server(self, value):
-        if isinstance(value, (Localhost, Server)):
-            self._server = value
-        elif isinstance(value, str):
-            if value == 'localhost':
-                self._server = Localhost()
-            else:
-                self._server = connector.receive(value)
-        pass
+    def execute(self):
+        if self:
+            raise NotImplemented
 
     pass
 
@@ -240,8 +252,8 @@ class OS():
 class Mapper(Transformable, Model):
     """Represents basic mapper used for data transformation."""
 
-    def __init__(self, model_name=None):
-        super().__init__(name=(model_name or __class__.__name__))
+    def configure(self):
+        """Configure transformation."""
         pass
 
     def transform(self, input):
@@ -251,96 +263,65 @@ class Mapper(Transformable, Model):
     pass
 
 
-class Table(Extractable, Loadable, DB, Model):
+class Table(Extractable, Loadable, Model):
     """Represents database table as ETL model."""
 
-    def __init__(self, model_name=None, database=None, schema=None,
-                 table_name=None, db_link=None, fetch_size=1000,
-                 purge=False, append=False):
-        super().__init__(name=(model_name or __class__.__name__))
-        self._database = None
-        self._schema = None
-        self._table_name = None
-        self._db_link = None
-        self._fetch_size = None
-        self._purge = None
-        self._append = None
-
-        self.database = database
-        self.schema = schema
+    def configure(self, schema_name=None, table_name=None, db_link=None,
+                  append=False):
+        self.schema_name = schema_name
         self.table_name = table_name
         self.db_link = db_link
-        self.fetch_size = fetch_size
-        self.purge = purge
         self.append = append
-
         pass
 
     @property
-    def schema(self):
-        """Describe schema name."""
-        return self._schema
+    def schema_name(self):
+        """Schema owning the table."""
+        return self._schema_name
 
-    @schema.setter
-    def schema(self, value):
+    @schema_name.setter
+    def schema_name(self, value):
         if isinstance(value, str):
-            self._schema = value.lower()
+            self._schema_name = value.lower()
+        else:
+            self._schema_name = None
         pass
 
     @property
     def table_name(self):
-        """Describe schema name."""
+        """Name used to access the table in database."""
         return self._table_name
 
     @table_name.setter
     def table_name(self, value):
         if isinstance(value, str):
             self._table_name = value.lower()
+        else:
+            self._table_name = None
         pass
 
     @property
     def db_link(self):
-        """Describe DB link name."""
+        """Database link used to access the table."""
         return self._db_link
 
     @db_link.setter
     def db_link(self, value):
         if isinstance(value, str):
             self._db_link = value.lower()
+        else:
+            self._db_link = None
         pass
 
     @property
-    def fetch_size(self):
-        """Describe fetch size value."""
-        return self._fetch_size
-
-    @fetch_size.setter
-    def fetch_size(self, value):
-        if isinstance(value, int):
-            self._fetch_size = value
-        pass
-
-    @property
-    def purge(self):
-        """Describe flag defining whether data purge is needed or not."""
-        return self._purge
-
-    @purge.setter
-    def purge(self, value):
-        if isinstance(value, bool):
-            self._purge = value
-        pass
-
-    @property
-    def append(self):
-        """Describe flag defining whether append hint needed or not."""
-        return self._append
-
-    @append.setter
-    def append(self, value):
-        if isinstance(value, bool):
-            self._append = value
-        pass
+    def reference(self):
+        """Get table reference string: schema_name.table_name@db_link."""
+        string = self.table_name
+        if self.schema_name:
+            string = f'{self.schema_name}.{string}'
+        if self.db_link:
+            string = f'{string}@{self.db_link}'
+        return string
 
     @property
     def exists(self):
@@ -349,39 +330,31 @@ class Table(Extractable, Loadable, DB, Model):
             return self.db.engine.has_table(self.table_name)
         pass
 
-    def configure(self, database=None, schema=None, table_name=None,
-                  db_link=None, fetch_size=None, append=None, purge=None):
-        """Configure the model properties."""
-        self.database = database
-        self.schema = schema
-        self.table_name = table_name
-        self.db_link = db_link
-        self.fetch_size = fetch_size
-        self.purge = purge
-        self.append = append
+    @property
+    def append(self):
+        """Flag defining whether append hint is needed or not."""
+        return self._append
+
+    @append.setter
+    def append(self, value):
+        if isinstance(value, bool):
+            self._append = value
+        else:
+            self._append = None
         pass
 
     def get_table(self):
         """Get object representing table."""
-        name = self.table_name
         meta = sa.MetaData()
         engine = self.db.engine
-        table = sa.Table(name, meta, schema=self.schema,
+        table = sa.Table(self.table_name, meta, schema=self.schema_name,
                          autoload=True, autoload_with=engine)
-        return table
-
-    def get_address(self):
-        """Get full database table address (schema, table name, db link)."""
-        table = self.table_name
-        table = table if self.schema is None else f'{self.schema}.{table}'
-        table = table if self.db_link is None else f'{table}@{self.db_link}'
         return table
 
     def select(self):
         """Select table data."""
         conn = self.db.connect()
-        table = self.get_address()
-        query = sa.text(to_sql(f'select * from {table}'))
+        query = sa.text(to_sql(f'select * from {self.reference}'))
         logger.info(f'Running SQL query <{self.table_name}>...')
         logger.line(f'-------------------\n{query}\n-------------------')
         answerset = conn.execute(query)
@@ -392,7 +365,7 @@ class Table(Extractable, Loadable, DB, Model):
         """Fetch data from the table."""
         answerset = self.select()
         while True:
-            dataset = answerset.fetchmany(self.fetch_size)
+            dataset = answerset.fetchmany(self.chunk_size)
             if dataset:
                 yield [dict(record) for record in dataset]
             else:
@@ -418,15 +391,14 @@ class Table(Extractable, Loadable, DB, Model):
     def truncate(self):
         """Truncate table data."""
         conn = self.db.engine.connect()
-        table = self.get_address()
-        query = sa.text(f'truncate table {table}')
+        query = sa.text(f'truncate table {self.reference}')
         conn.execute(query)
         logger.info(f'Table {self.table_name} truncated')
         pass
 
     def prepare(self):
         """Prepare model for ETL operation."""
-        if self.purge is True:
+        if self.cleanup is True:
             logger.debug(f'Table {self.table_name} will be purged')
             if self.db.vendor == 'oracle':
                 self.truncate()
@@ -446,13 +418,10 @@ class Table(Extractable, Loadable, DB, Model):
     pass
 
 
-class SQL(Executable, DB, Model):
+class SQL(Executable, Model):
     """Represents SQL script as ETL model."""
 
-    def __init__(self, model_name=None, database=None, text=None, file=None,
-                 parallel=False):
-        super().__init__(name=(model_name or __class__.__name__))
-        self.database = database
+    def configure(self, text=None, file=None, parallel=False):
         self.text = text
         self.file = file
         self.parallel = parallel
@@ -490,7 +459,7 @@ class SQL(Executable, DB, Model):
 
     @property
     def parallel(self):
-        """Get parallel flag."""
+        """Get parallel hint flag."""
         return self._parallel
 
     @parallel.setter
@@ -541,27 +510,16 @@ class SQL(Executable, DB, Model):
     pass
 
 
-class Select(Extractable, DB, Model):
+class Select(Extractable, Model):
     """Represents SQL select as ETL model."""
 
-    def __init__(self, model_name=None, database=None, text=None, file=None,
-                 columns=None, alias=None, parallel=False, fetch_size=1000):
-        super().__init__(name=(model_name or __class__.__name__))
-        self._database = None
-        self._parallel = None
-        self._text = None
-        self._file = None
-        self._columns = None
-        self._alias = None
-        self._fetch_size = None
-
-        self.database = database
+    def configure(self, text=None, file=None, columns=None, alias=None,
+                  parallel=False):
         self.parallel = parallel
         self.text = text
         self.file = file
         self.columns = columns
         self.alias = alias
-        self.fetch_size = fetch_size
         pass
 
     @property
@@ -675,7 +633,7 @@ class Select(Extractable, DB, Model):
         """Fetch data from the query answerset."""
         answerset = self.execute()
         while True:
-            dataset = answerset.fetchmany(self.fetch_size)
+            dataset = answerset.fetchmany(self.chunk_size)
             if dataset:
                 yield [dict(record) for record in dataset]
             else:
@@ -710,65 +668,62 @@ class Select(Extractable, DB, Model):
     pass
 
 
-class Insert(Executable, DB, Model):
+class Insert(Executable, Model):
     """Represents SQL insert as ETL model."""
 
-    def __init__(self, model_name=None, database=None, schema=None, table=None,
-                 select=None, purge=False, append=False, parallel=False):
-        super().__init__(name=(model_name or __class__.__name__))
-        self.database = database
-        self.schema = schema
-        self.table = table
+    def configure(self, schema_name=None, table_name=None,
+                  select=None, append=False, parallel=False):
+        self.schema_name = schema_name
+        self.table_name = table_name
         self.select = select
-        self.purge = purge
         self.append = append
         self.parallel = parallel
         pass
 
     @property
-    def schema(self):
+    def schema_name(self):
         """Get inserting table schema name."""
-        return self._schema
+        return self._schema_name
 
-    @schema.setter
-    def schema(self, value):
+    @schema_name.setter
+    def schema_name(self, value):
         if isinstance(value, str):
-            self._schema = value.lower()
+            self._schema_name = value.lower()
         elif value is None:
-            self._schema = None
+            self._schema_name = None
         pass
 
     @property
-    def table(self):
+    def table_name(self):
         """Get inserting table name."""
-        return self._table
+        return self._table_name
 
-    @table.setter
-    def table(self, value):
+    @table_name.setter
+    def table_name(self, value):
         if isinstance(value, str):
-            self._table = value.lower()
+            self._table_name = value.lower()
         elif value is None:
-            self._table = None
+            self._ta_table_nameble = None
         pass
 
     @property
-    def address(self):
-        """Get full inserting table address."""
-        table = self.table
-        table = table if self.schema is None else f'{self.schema}.{table}'
-        table = table if self.db_link is None else f'{table}@{self.db_link}'
+    def reference(self):
+        """Get table reference string: schema_name.table_name@db_link."""
+        string = self.table_name
+        if self.schema_name:
+            string = f'{self.schema_name}.{string}'
+        if self.db_link:
+            string = f'{string}@{self.db_link}'
+        return string
+
+    @property
+    def object(self):
+        """Get object representing inserting table."""
+        meta = sa.MetaData()
+        engine = self.db.engine
+        table = sa.Table(self.table_name, meta, schema=self.schema_name,
+                         autoload=True, autoload_with=engine)
         return table
-
-    @property
-    def purge(self):
-        """Get flag defining whether data purge is needed or not."""
-        return self._purge
-
-    @purge.setter
-    def purge(self, value):
-        if isinstance(value, bool):
-            self._purge = value
-        pass
 
     @property
     def append(self):
@@ -791,16 +746,6 @@ class Insert(Executable, DB, Model):
         if isinstance(value, (int, bool)) or value is None:
             self._parallel = value
         pass
-
-    @property
-    def object(self):
-        """Get object representing inserting table."""
-        name = self.table
-        meta = sa.MetaData()
-        engine = self.db.engine
-        table = sa.Table(name, meta, schema=self.schema,
-                         autoload=True, autoload_with=engine)
-        return table
 
     @property
     def text(self):
@@ -883,8 +828,8 @@ class Insert(Executable, DB, Model):
     def prepare(self):
         """Prepare model for ETL operation."""
         self.logger = self.createlog()
-        if self.purge is True:
-            logger.debug(f'Table {self.table} will be purged')
+        if self.cleanup is True:
+            logger.debug(f'Table {self.table_name} will be purged')
             if self.db.vendor == 'oracle':
                 self.truncate()
             else:
@@ -897,16 +842,15 @@ class Insert(Executable, DB, Model):
         table = self.object
         query = table.delete()
         result = conn.execute(query)
-        logger.info(f'{result.rowcount} {self.table} records deleted')
+        logger.info(f'{result.rowcount} {self.table_name} records deleted')
         pass
 
     def truncate(self):
         """Truncate table data."""
         conn = self.db.engine.connect()
-        table = self.address
-        query = sa.text(f'truncate table {table}')
+        query = sa.text(f'truncate table {self.reference}')
         conn.execute(query)
-        logger.info(f'Table {self.table} truncated')
+        logger.info(f'Table {self.table_name} truncated')
         pass
 
     def execute(self, step):
@@ -920,7 +864,7 @@ class Insert(Executable, DB, Model):
                       task_id=self.task.id,
                       step_id=step.id,
                       db_name=self.db.name,
-                      table_name=self.table,
+                      table_name=self.table_name,
                       query_text=query)
         try:
             result = conn.execute(query)
@@ -932,7 +876,6 @@ class Insert(Executable, DB, Model):
             self.endlog(output_rows=result.rowcount)
             logger.info(f'SQL query completed')
             return result.rowcount
-        pass
 
     def createlog(self):
         """Generate special logger."""
@@ -966,28 +909,13 @@ class Insert(Executable, DB, Model):
     pass
 
 
-class File(Extractable, Loadable, OS, Model):
+class File(Extractable, Loadable, Model):
     """Represents file as ETL model."""
 
-    def __init__(self, model_name=None, path=None, file_name=None,
-                 encoding='utf-8', fetch_size=1000, purge=False):
-        super().__init__(name=(model_name or __class__.__name__))
-        self.path = path
+    def configure(self, file_name=None, path=None, encoding='utf-8'):
         self.file_name = file_name
+        self.path = path
         self.encoding = encoding
-        self.fetch_size = fetch_size
-        self.purge = purge
-        pass
-
-    @property
-    def path(self):
-        """Get full file path."""
-        return self._path
-
-    @path.setter
-    def path(self, value):
-        if isinstance(value, str) or value is None:
-            self._path = os.path.abspath(value) if value is not None else None
         pass
 
     @property
@@ -1001,6 +929,17 @@ class File(Extractable, Loadable, OS, Model):
             self._file_name = tm.strftime(value) if value is not None else None
             if self.file_name is not None:
                 self.path = os.path.join(self._path, self._file_name)
+        pass
+
+    @property
+    def path(self):
+        """Get full file path."""
+        return self._path
+
+    @path.setter
+    def path(self, value):
+        if isinstance(value, str) or value is None:
+            self._path = os.path.abspath(value) if value is not None else None
         pass
 
     @property
@@ -1021,29 +960,6 @@ class File(Extractable, Loadable, OS, Model):
             return True
         else:
             return False
-        pass
-
-    @property
-    def fetch_size(self):
-        """Get fetch size value."""
-        return self._fetch_size
-
-    @fetch_size.setter
-    def fetch_size(self, value):
-        if isinstance(value, int) or value is None:
-            self._fetch_size = value
-        pass
-
-    @property
-    def purge(self):
-        """Get purge flag."""
-        return self._purge
-
-    @purge.setter
-    def purge(self, value):
-        if isinstance(value, bool) or value is None:
-            self._purge = value
-        pass
 
     def delete(self):
         """Delete all file data."""
@@ -1053,7 +969,7 @@ class File(Extractable, Loadable, OS, Model):
 
     def prepare(self):
         """Prepare model ETL operation."""
-        if self.purge is True:
+        if self.cleanup is True:
             logger.debug(f'File {self.path} will be completely purged')
             self.delete()
         pass
@@ -1064,13 +980,10 @@ class File(Extractable, Loadable, OS, Model):
 class CSV(File):
     """Represents CSV file as ETL model."""
 
-    def __init__(self, model_name=None, path=None, file_name=None,
-                 head=True, columns=None, delimiter=';', terminator='\r\n',
-                 enclosure=None, trim=False, encoding='utf-8', fetch_size=1000,
-                 purge=False):
-        super().__init__(model_name=(model_name or __class__.__name__),
-                         path=path, file_name=file_name, encoding=encoding,
-                         fetch_size=fetch_size, purge=purge)
+    def configure(self, file_name=None, path=None, encoding='utf-8',
+                  head=True, columns=None, delimiter=';', terminator='\r\n',
+                  enclosure=None, trim=False):
+        super().configure(file_name=file_name, path=path, encoding=encoding)
         self.head = head
         self.columns = columns
         self.delimiter = delimiter
@@ -1172,11 +1085,11 @@ class CSV(File):
             rows = [row for row in reader]
             length = len(rows)
             start = 0
-            end = start+self.fetch_size
+            end = start+self.chunk_size
             while start < length:
                 yield rows[start:end]
-                start += self.fetch_size
-                end = start+self.fetch_size
+                start += self.chunk_size
+                end = start+self.chunk_size
         pass
 
     def load(self, step, dataset):
@@ -1196,11 +1109,8 @@ class CSV(File):
 class JSON(File):
     """Represents JSON file as ETL model."""
 
-    def __init__(self, model_name=None, path=None, file_name=None,
-                 encoding='utf-8', fetch_size=1000, purge=False):
-        super().__init__(model_name=(model_name or __class__.__name__),
-                         path=path, file_name=file_name, encoding=encoding,
-                         fetch_size=fetch_size, purge=purge)
+    def configure(self, file_name=None, path=None, encoding='utf-8'):
+        super().configure(file_name=file_name, path=path, encoding=encoding)
         pass
 
     def parse(self):
@@ -1218,11 +1128,11 @@ class JSON(File):
             rows = json.load(fh)
             length = len(rows)
             start = 0
-            end = start+self.fetch_size
+            end = start+self.chunk_size
             while start < length:
                 yield rows[start:end]
-                start += self.fetch_size
-                end = start+self.fetch_size
+                start += self.chunk_size
+                end = start+self.chunk_size
         pass
 
     def load(self, step, dataset):
@@ -1238,11 +1148,9 @@ class JSON(File):
 class XML(File):
     """Represents XML file as ETL model."""
 
-    def __init__(self, model_name=None, path=None, file_name=None,
-                 encoding='utf-8', fetch_size=1000, purge=False):
-        super().__init__(model_name=(model_name or __class__.__name__),
-                         path=path, file_name=file_name, encoding=encoding,
-                         fetch_size=fetch_size, purge=purge)
+    def configure(self, file_name=None, path=None, encoding='utf-8'):
+        super().configure(file_name=file_name, path=path, encoding=encoding)
+        pass
 
     def parse(self):
         """Parse XML file and/or get XML tree root."""
@@ -1257,14 +1165,14 @@ class XML(File):
         root = self.parse()
         length = len(root)
         start = 0
-        end = start+self.fetch_size
+        end = start+self.chunk_size
         while start < length:
             dataset = []
             for record in root[start:end]:
                 dataset.append({field.tag: field.text for field in record})
             yield dataset
-            start += self.fetch_size
-            end = start+self.fetch_size
+            start += self.chunk_size
+            end = start+self.chunk_size
         pass
 
     def load(self, step, dataset):
@@ -1286,17 +1194,14 @@ class XML(File):
     pass
 
 
-class Files(Extractable, OS, Model):
+class Files(Extractable, Model):
     """Represents file sequence as ETL model."""
 
-    def __init__(self, model_name=None, server='localhost', path=None,
-                 recursive=None, mask=None, created=None):
-        super().__init__(name=(model_name or __class__.__name__))
-        self.server = server
+    def configure(self, path=None, mask=None, created=None, recursive=None):
         self.path = path
-        self.recursive = recursive
         self.mask = mask
         self.created = created
+        self.recursive = recursive
         pass
 
     @property
@@ -1354,11 +1259,11 @@ class Files(Extractable, OS, Model):
     def filter(self):
         """Generate filtered list of files."""
         date_from, date_to = self.between()
-        logger.info(f'Using dates [{date_from}, {date_to}] to filter files')
+        logger.info(f'Using mask {self.mask} to filter files')
+        logger.info(f'Using dates {date_from} and {date_to} to filter files')
         for record in self.read():
             path = record['path']
             mtime = record['mtime']
-            # size = record['size']
             if self.mask is not None:
                 if re.match(self.mask, os.path.basename(path)) is None:
                     logger.debug(f'{path} filtered by mask')
@@ -1463,20 +1368,17 @@ class Files(Extractable, OS, Model):
     pass
 
 
-class FileManager(Loadable, OS, Model):
+class FileManager(Loadable, Model):
     """Represents file manager as ETL model."""
 
-    def __init__(self, model_name=None, server='localhost', action='copy',
-                 dest=None, nodir=False, zip=False, unzip=False,
-                 tempname=False):
-        super().__init__(name=(model_name or __class__.__name__))
-        self.server = server
+    def configure(self, action='copy', dest=None, nodir=False, tempname=False,
+                  zip=False, unzip=False):
         self.action = action
         self.dest = dest
         self.nodir = nodir
+        self.tempname = tempname
         self.zip = zip
         self.unzip = unzip
-        self.tempname = tempname
         pass
 
     @property
@@ -1520,6 +1422,17 @@ class FileManager(Loadable, OS, Model):
         pass
 
     @property
+    def tempname(self):
+        """Get static name used for temporary files."""
+        return self._tempname
+
+    @tempname.setter
+    def tempname(self, value):
+        if isinstance(value, (str, bool)) or value is None:
+            self._tempname = value
+        pass
+
+    @property
     def zip(self):
         """Get flag defining whether files must be zipped or not."""
         return self._zip
@@ -1539,17 +1452,6 @@ class FileManager(Loadable, OS, Model):
     def unzip(self, value):
         if isinstance(value, bool) or value is None:
             self._unzip = value
-        pass
-
-    @property
-    def tempname(self):
-        """Get static name used for temporary files."""
-        return self._tempname
-
-    @tempname.setter
-    def tempname(self, value):
-        if isinstance(value, (str, bool)) or value is None:
-            self._tempname = value
         pass
 
     def createlog(self):

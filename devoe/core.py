@@ -25,6 +25,7 @@ import sqlalchemy as sa
 
 from .db import db
 from .config import config
+from .config import connector
 from .config import calendar
 from .logger import logger
 
@@ -35,6 +36,7 @@ from .utils import to_datetime, to_timestamp
 from .utils import to_process, to_python
 
 from .config import Logging
+from .config import Localhost, Server, Database
 
 
 class Scheduler():
@@ -1131,6 +1133,11 @@ class Pipeline():
         pass
 
     @property
+    def order(self):
+        """Get list of nodes in order of steps."""
+        return list(self.nodes.values())
+
+    @property
     def roots(self):
         """List all root steps."""
         return [step for step in self.walk() if not step.a.prev]
@@ -1142,7 +1149,7 @@ class Pipeline():
 
     def bind(self, *nodes):
         """Extend pipeline using nodes listed."""
-        root = self.nodes[0] if self.nodes else None
+        root = self.order[0] if self.nodes else None
         for node in nodes:
             if not isinstance(node, (Node, list, tuple)):
                 requires = 'Node, list or tupple'
@@ -1225,7 +1232,7 @@ class Process():
     @property
     def process_name(self):
         """Get process name."""
-        return self._name
+        return self.name
 
     @property
     def name(self):
@@ -1274,7 +1281,7 @@ class Unit():
     @property
     def unit_name(self):
         """Get unit name."""
-        return self._name
+        return self.name
 
     @property
     def name(self):
@@ -1320,9 +1327,9 @@ class Unit():
 class Task(Process):
     """Represents pipeline task."""
 
-    def __init__(self, name=None, pipeline=None):
+    def __init__(self, task_name=None, pipeline=None):
         self.id = None
-        self.name = name or __class__.__name__
+        self.task_name = task_name or self.__class__.__name__
         if pipeline is not None:
             self.setup(pipeline)
 
@@ -1344,6 +1351,15 @@ class Task(Process):
             return f'Task[{self.id}]'
         else:
             return 'Task'
+
+    @property
+    def task_name(self):
+        return self.name
+
+    @task_name.setter
+    def task_name(self, value):
+        self.name = value
+        pass
 
     @property
     def status(self):
@@ -1521,7 +1537,7 @@ class Task(Process):
             self.end_date = dt.datetime.now()
             self.logger.table(end_date=self.end_date)
         elif self.status == 'E':
-            if self.logging.task.fields.get('text_error'):
+            if self.pipeline.logging.task.fields.get('text_error'):
                 self.logger.table(text_error=self.text_error)
         logger.debug(f'{self} ended')
         return self.end()
@@ -1548,9 +1564,9 @@ class Task(Process):
 class Step(Process, Unit):
     """Represents task step."""
 
-    def __init__(self, name=None, a=None, b=None, c=None, pipeline=None):
+    def __init__(self, step_name=None, a=None, b=None, c=None, pipeline=None):
         self.id = None
-        self.name = name or __class__.__name__
+        self.step_name = step_name or self.__class__.__name__
         self.seqno = None
         self.thread = None
         self.threads = []
@@ -1593,7 +1609,7 @@ class Step(Process, Unit):
 
     @step_name.setter
     def step_name(self, value):
-        self.rename(value)
+        self.name = value
         pass
 
     @property
@@ -1860,7 +1876,7 @@ class Step(Process, Unit):
             self.end_date = dt.datetime.now()
             self.logger.table(end_date=self.end_date)
         elif self.status == 'E':
-            if self.logging.step.fields.get('text_error'):
+            if self.pipeline.logging.step.fields.get('text_error'):
                 self.logger.table(text_error=self.text_error)
         logger.debug(f'{self} ended')
         pass
@@ -1887,9 +1903,10 @@ class Step(Process, Unit):
 class Node(Unit):
     """Represents task node."""
 
-    def __init__(self, name=None, seqno=None, pipeline=None):
-        self.name = name or __class__.__name__
-        self.seqno = seqno
+    def __init__(self, node_name=None, source_name=None, pipeline=None):
+        self.node_name = node_name or self.__class__.__name__
+        self.source_name = source_name
+        self.seqno = None
         self.thread = None
         if pipeline:
             self.setup(pipeline)
@@ -1907,6 +1924,25 @@ class Node(Unit):
     @node_name.setter
     def node_name(self, value):
         self.name = value
+        pass
+
+    @property
+    def source_name(self):
+        """Get data source name."""
+        return self._source_name
+
+    @source_name.setter
+    def source_name(self, value):
+        if isinstance(value, str) or value is None:
+            self._source_name = value
+            if self._source_name == 'localhost' or value is None:
+                self.server = Localhost()
+            else:
+                connection = connector.receive(value)
+                if isinstance(connection, Database):
+                    self.database = self.db = connection
+                elif isinstance(connection, Server):
+                    self.server = connection
         pass
 
     @property
@@ -1971,9 +2007,4 @@ class Node(Unit):
             raise TypeError(message)
         pass
 
-    def prepare(self):
-        """Prepare this node."""
-        pass
-
     pass
-

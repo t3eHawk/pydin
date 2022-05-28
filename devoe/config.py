@@ -13,6 +13,9 @@ import paramiko as po
 import pepperoni as pe
 import sqlalchemy as sa
 
+from .utils import coalesce
+from .utils import is_path
+
 
 home = os.environ.get('DEVOE_HOME')
 filename = 'devoe.ini'
@@ -671,7 +674,7 @@ class Connector(dict):
 
     def __init__(self):
         super().__init__()
-        self.config = os.path.abspath(os.path.expanduser('~/.devoe/index.ini'))
+        self.config = os.path.expanduser('~/.devoe/sources.ini')
         pass
 
     class Connection():
@@ -679,33 +682,56 @@ class Connector(dict):
 
         def __new__(self, name=None, **options):
             """Create connection object using options passed."""
-            if options.get('database') is True:
-                return Database(name=name, vendor=options['vendor'],
-                                driver=options.get('driver'),
-                                path=options.get('path'),
-                                host=options.get('host'),
-                                port=options.get('port'),
-                                sid=options.get('sid'),
-                                service=options.get('service'),
-                                user=options.get('user'),
-                                password=options.get('password'))
-            elif (
-                options.get('ssh') is True
-                or options.get('sftp') is True
-                or options.get('ftp') is True
-            ):
-                return Server(name=name, host=options.get('host'),
-                              port=options.get('port'),
-                              user=options.get('user'),
-                              password=options.get('password'),
-                              key=options.get('key'),
-                              keyfile=options.get('keyfile'),
-                              ssh=options.get('ssh'),
-                              sftp=options.get('sftp'),
-                              ftp=options.get('ftp'))
+            given_options = options.keys()
+            database_options = {'vendor', 'driver', 'database'}
+            server_options = {'protocol', 'host', 'port'}
+
+            if set.intersection(database_options, given_options):
+                vendor = options['vendor']
+                driver = options.get('driver')
+                database = options.get('database')
+                username = options.get('username')
+                password = options.get('password')
+                host = options.get('host')
+                port = options.get('port')
+                
+                if is_path(database):
+                    path = os.path.abspath(database)
+                    database = None
+
+                sid = options.get('sid')
+                tnsname = options.get('tnsname')
+                database = coalesce(database, sid, tnsname)
+
+                service = options.get('service')
+                service_name = options.get('service_name')
+                service = coalesce(service, service_name)
+
+                return Database(name=name, vendor=vendor, driver=driver,
+                                user=username, password=password,
+                                path=path, host=host, port=port,
+                                sid=database, service=service)
+            elif set.intersection(server_options, given_options):
+                protocol = options.get('protocol').lower()
+                host = options.get('host')
+                port = options.get('port')
+                username = options.get('user')
+                password = options.get('password')
+                key = options.get('key')
+                keyfile = options.get('keyfile')
+
+                ssh = True if protocol == 'ssh' else False
+                sftp = True if protocol == 'sftp' else False
+                ftp = True if protocol == 'ftp' else False
+
+                return Server(name=name, host=host, port=port,
+                              user=username, password=password,
+                              key=key, keyfile=keyfile,
+                              ssh=ssh, sftp=sftp, ftp=ftp)
             else:
                 return None
-            pass
+
+        pass
 
     def load(self, path=None, encoding=None):
         """Load configuration from file."""
@@ -718,18 +744,7 @@ class Connector(dict):
             for option in parser.options(section):
                 option = option.lower()
                 value = parser[section][option]
-                if option in ('database', 'ssh', 'sftp', 'ftp'):
-                    if value.upper() in ('TRUE', '1'):
-                        self[section][option] = True
-                    elif value.upper() in ('FALSE', '0'):
-                        self[section][option] = False
-                    else:
-                        continue
-                elif option in ('host', 'port', 'user',
-                                'password', 'key', 'keyfile',
-                                'vendor', 'driver',
-                                'path', 'sid', 'service'):
-                    self[section][option] = value
+                self[section][option] = value
         return self
 
     def receive(self, name):
