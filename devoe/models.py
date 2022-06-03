@@ -1076,20 +1076,26 @@ class CSV(File):
                    'skipinitialspace': skipinitialspace}
         return dialect
 
+    def count(self):
+        """Count the number of records in the source CSV file."""
+        with open(self.path, 'r', encoding=self.encoding) as fh:
+            reader = csv.DictReader(fh, self.columns, **self.dialect)
+            total = sum(1 for i in reader)
+            return total
+
     def extract(self, step):
         """Extract data from CSV file."""
         with open(self.path, 'r', encoding=self.encoding) as fh:
-            dialect = self.dialect
-            fieldnames = self.columns
-            reader = csv.DictReader(fh, fieldnames, **dialect)
-            rows = [row for row in reader]
-            length = len(rows)
-            start = 0
-            end = start+self.chunk_size
-            while start < length:
-                yield rows[start:end]
-                start += self.chunk_size
-                end = start+self.chunk_size
+            reader = csv.DictReader(fh, self.columns, **self.dialect)
+            total = self.count()
+            chunk = []
+            i = 1
+            for record in reader:
+                chunk.append(record)
+                if i % self.chunk_size == 0 or i == total:
+                    yield chunk
+                    chunk = []
+                i += 1
         pass
 
     def load(self, step, dataset):
