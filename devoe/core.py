@@ -582,49 +582,47 @@ class Job():
 
         self.name = name or schedule['name']
         self.desc = desc or schedule['desc']
-
         self.mode = 'A' if args.auto is True else 'M'
-        self.tag = args.tag or tag
-        self.date = args.date or date
 
-        self.added = None
-        self.updated = None
-        self.start_date = None
-        self.end_date = None
-        self.status = None
-        self.data = types.SimpleNamespace()
-        self.errors = set()
-
-        table = db.tables.run_history
+        history = db.tables.run_history
         self.record_id = args.record or record_id
-        self.record = db.record(table, self.record_id)
-        self.reruns = None
-        self.seqno = None
-
-        self.trigger_id = args.trigger or trigger_id
-        self.trigger = db.record(table, self.trigger_id)
-
-        self.initiator_id = None
-        self.initiator = db.record(table, self.initiator_id)
-
+        self.record = db.record(history, self.record_id)
         if self.record_id:
             result = self.record.read()
             if result and self.id == result.job_id:
                 self.tag = result.run_tag
-                self.date = result.run_date
                 self.added = result.added
                 self.updated = result.updated
                 self.start_date = result.start_date
                 self.end_date = result.end_date
                 self.status = result.status
-                if result.data_dump:
-                    self.data = pickle.loads(result.data_dump)
-
                 self.reruns = result.rerun_times
                 self.seqno = result.rerun_seqno
+
+                if result.data_dump:
+                    self.data = pickle.loads(result.data_dump)
             else:
-                message = f'no such {self} having run[{self.record_id}]'
+                run = f'run[{self.record_id}]'
+                message = f'no such {self} having {run}'
                 raise ValueError(message)
+        else:
+            self.tag = coalesce(args.tag, args.date, tag, date, tm.time())
+            self.added = None
+            self.updated = None
+            self.start_date = None
+            self.end_date = None
+            self.status = None
+            self.reruns = None
+            self.seqno = None
+
+            self.data = types.SimpleNamespace()
+            self.errors = set()
+
+        self.trigger_id = args.trigger or trigger_id
+        self.trigger = db.record(history, self.trigger_id)
+
+        self.initiator_id = None
+        self.initiator = db.record(history, self.initiator_id)
 
         # Configure dependent objects.
         recipients = coalesce(recipients, schedule['recipients'])
@@ -681,7 +679,8 @@ class Job():
             if isinstance(value, int):
                 self._id = value
             else:
-                message = f'id must be int, not {value.__class__.__name__}'
+                class_name = value.__class__.__name__
+                message = f'id must be int, not {class_name}'
                 raise ValueError(message)
         else:
             message = 'id cannot be redefined'
@@ -697,15 +696,14 @@ class Job():
 
     @tag.setter
     def tag(self, value):
-        if isinstance(value, (int, float)):
-            self._tag = to_timestamp(value)
-            self._date = to_datetime(value)
+        if isinstance(value, (int, float, str, dt.datetime)):
+            self._tag, self._date = to_timestamp(value), to_datetime(value)
         elif value is None:
-            self._tag = None
-            self._date = None
+            self._tag, self._date = None, None
         else:
-            type = value.__class__.__name__
-            message = f'tag must be int or float, not {type}'
+            requires = 'int, float, str or datetime'
+            class_name = value.__class__.__name__
+            message = f'tag must be {requires}, not {class_name}'
             raise ValueError(message)
         pass
 
@@ -718,15 +716,13 @@ class Job():
 
     @date.setter
     def date(self, value):
-        if self.tag is None:
-            if isinstance(value, (str, dt.datetime)):
-                self.tag = to_timestamp(self.date)
-            elif value is None:
-                self.tag = None
-            else:
-                type = value.__class__.__name__
-                message = f'date must be str or datetime, not {type}'
-                raise ValueError(message)
+        if isinstance(value, (str, dt.datetime)) or value is None:
+            self.tag = value
+        else:
+            requires = 'str or datetime'
+            class_name = value.__class__.__name__
+            message = f'date must be {requires}, not {class_name}'
+            raise ValueError(message)
         pass
 
     @property
@@ -818,7 +814,6 @@ class Job():
     def _start(self):
         logger.info(f'{self} starts...')
         if self.record_id is None:
-            self.tag = self.tag or tm.time()
             self.start_date = dt.datetime.now()
             self.status = 'S'
             self._start_as_new()
@@ -843,11 +838,18 @@ class Job():
                 self.reruns = None
                 self.initiator_id = self.initiator.select(self.record_id)
                 self._start_as_rerun()
+
+        run = f'run[{self.record_id}]'
+        tag = f'tag[{self.tag}]'
+        logger.info(f'{self} started as {run} using {tag}')
+        logger.info(f'{self} reports for date - {self.date}')
+
         logger.debug(f'{self} started')
         pass
 
     def _start_as_new(self):
         logger.debug(f'{self} will be executed as totally new')
+
         self.record_id = self.record.create()
         self.record.write(job_id=self.id,
                           run_mode=self.mode,
@@ -863,12 +865,11 @@ class Job():
                           user=self.user,
                           pid=self.pid,
                           file_log=self.file_log)
-        logger.info(f'{self} started as run[{self.record_id}] '
-                    f'using tag[{self.tag}] meaning date[{self.date}]')
         pass
 
     def _start_as_continue(self):
         logger.debug(f'{self} will be executed as continue')
+
         self.record.write(run_mode=self.mode,
                           start_date=self.start_date,
                           status=self.status,
@@ -876,14 +877,14 @@ class Job():
                           user=self.user,
                           pid=self.pid,
                           file_log=self.file_log)
-        logger.info(f'{self} started as run[{self.record_id}] '
-                    f'using tag[{self.tag}] meaning date[{self.date}]')
         pass
 
     def _start_as_rerun(self):
         logger.debug(f'{self} will be executed as rerun')
-        logger.info(f'{self} {self.seqno}-th rerun initiated '
-                    f'from run[{self.initiator_id}]')
+
+        run = f'run[{self.initiator_id}]'
+        logger.info(f'{self} {self.seqno}-th rerun initiated from {run}')
+
         self.record_id = self.record.create()
         self.record.write(job_id=self.id,
                           run_mode=self.mode,
@@ -900,8 +901,6 @@ class Job():
                           pid=self.pid,
                           file_log=self.file_log)
         self.initiator.write(rerun_now='Y')
-        logger.info(f'{self} started as run[{self.record_id}] '
-                    f'using tag[{self.tag}] meaning date[{self.date}]')
         pass
 
     def _run(self):
@@ -1093,11 +1092,13 @@ class Pipeline():
         self.job = Job.get() if Job.exists() else None
         if self.job:
             logger.debug(f'Using {self.job} configuration in {self}...')
-            self.name = self.job.name
-            self.date = self.job.date
+            if self.job.name:
+                self.name = self.job.name
+            if self.job.date:
+                self.date = self.job.date
         self.logging = logging if isinstance(logging, Logging) else Logging()
         self.calendar = calendar.Day(self.date)
-        
+
         self.task.setup(self)
         self.add(*nodes)
         pass
