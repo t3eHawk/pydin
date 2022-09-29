@@ -32,7 +32,7 @@ BAD_REQUEST = flask.Response(status=400)
 SERVER_ERROR = flask.Response(status=500)
 
 
-class API():
+class Interface():
     """Represents web API server."""
 
     def __init__(self, host=None, port=None, dev=False):
