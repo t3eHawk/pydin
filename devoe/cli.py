@@ -1,6 +1,7 @@
 """Contains application manager."""
 
 import argparse
+import time
 import datetime as dt
 import os
 import re
@@ -290,6 +291,7 @@ class Manager():
             elif key == 'date':
                 value = dt.datetime.fromisoformat(value)
             kwargs[key] = value
+        kwargs['recycle'] = True if 'recycle' in args else None
         kwargs['debug'] = True if 'debug' in args else None
         kwargs['noalarm'] = False if 'noalarm' in args else None
         kwargs['solo'] = True if 'solo' in args else None
@@ -346,6 +348,7 @@ class Manager():
                     id = row[0]
                     args = row[1:] if ln > 1 else []
                     self.run_job(id, *args)
+                    time.sleep(1)
             clean = input(f'Clean file {path}? [Y] ')
             if clean == 'Y':
                 open(path, 'w').close()

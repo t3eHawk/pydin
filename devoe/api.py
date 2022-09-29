@@ -324,7 +324,7 @@ class Driver():
         pass
 
     def run_job(self, id, tag=None, date=None, record_id=None, trigger_id=None,
-                wait=True, debug=None, noalarm=None, solo=None):
+                recycle=None, debug=None, noalarm=None, solo=None, wait=True):
         """Run particular job."""
         repr = f'Job[{id}]'
         logger.debug(f'Requested to run {repr}')
@@ -341,6 +341,7 @@ class Driver():
                      'date': date.isoformat() if date is not None else None,
                      'record': record_id,
                      'trigger': trigger_id,
+                     'recycle': '' if recycle is True else None,
                      'debug': '' if debug is True else None,
                      'noalarm': '' if noalarm is False else None,
                      'solo': '' if solo is True else None}

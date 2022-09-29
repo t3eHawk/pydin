@@ -41,7 +41,6 @@ class Model(Node):
         self.key_field = key_field(self) if key_field else None
         self.chunk_size = chunk_size
         self.cleanup = cleanup
-        self.key_field = key_field
         self.configure(*args, **kwargs)
         pass
 
@@ -63,6 +62,13 @@ class Model(Node):
     @key_field.setter
     def key_field(self, value):
         self._key_field = value
+
+    @property
+    def recyclable(self):
+        if hasattr(self, 'recycle'):
+            return True
+        else:
+            return False
 
     def configure(self):
         """Configure this ETL model."""
@@ -425,6 +431,14 @@ class Table(Extractable, Loadable, Model):
         self.insert(dataset)
         pass
 
+    def recycle(self, key_value):
+        """Perform the recycle of this node."""
+        conn = self.db.connect()
+        table = self.get_table()
+        column = table.columns[self.key_field.label]
+        delete = table.delete().where(column == key_value)
+        conn.execute(delete)
+
     pass
 
 
@@ -626,7 +640,7 @@ class Select(Extractable, Model):
         query = self._hintinize(query)
         query = to_sql(f'select * from ({query}) where 1 = 0')
         answerset = conn.execute(query)
-        columns = answerset.keys()
+        columns = [column for column in answerset.keys()]
         return columns
 
     def execute(self):
@@ -690,6 +704,55 @@ class Insert(Executable, Model):
         self.parallel = parallel
         pass
 
+    def execute(self, step):
+        """Perform the action of this node."""
+        conn = self.db.connect()
+        query = self.parse()
+        logger.info(f'Running SQL query...')
+        logger.line(f'-------------------\n{query}\n-------------------')
+        self.startlog(job_id=self.job.id if self.task.job else None,
+                      run_id=self.job.record_id if self.job else None,
+                      task_id=self.task.id,
+                      step_id=step.id,
+                      db_name=self.db.name,
+                      table_name=self.table_name,
+                      query_text=query)
+        try:
+            result = conn.execute(query)
+        except sa.exc.SQLAlchemyError as error:
+            self.endlog(error_text=error.orig.__str__())
+            logger.info(f'SQL query failed')
+            raise error
+        else:
+            self.endlog(output_rows=result.rowcount)
+            logger.info(f'SQL query completed')
+            logger.info(f'{result.rowcount} records inserted')
+            return result.rowcount
+
+    def recycle(self, key_value):
+        """Perform the recycle of this node."""
+        conn = self.db.connect()
+        table = self.proxy
+        column = table.columns[self.key_field.label]
+        delete = table.delete().where(column == key_value)
+        conn.execute(delete)
+
+    def prepare(self):
+        """Prepare this node for the run."""
+        self.logger = self.createlog()
+        if self.cleanup is True:
+            self.clean()
+        pass
+
+    def clean(self):
+        """Remove all data from table."""
+        logger.debug(f'Table {self.table_name} will be purged')
+        if self.db.vendor == 'oracle':
+            self.truncate()
+        else:
+            self.delete()
+        pass
+
     @property
     def schema_name(self):
         """Get inserting table schema name."""
@@ -727,8 +790,8 @@ class Insert(Executable, Model):
         return string
 
     @property
-    def object(self):
-        """Get object representing inserting table."""
+    def proxy(self):
+        """Get proxy object representing inserting table."""
         meta = sa.MetaData()
         engine = self.db.engine
         table = sa.Table(self.table_name, meta, schema=self.schema_name,
@@ -758,39 +821,50 @@ class Insert(Executable, Model):
         pass
 
     @property
-    def text(self):
-        """Get raw SQL select text."""
-        return self._select
-
-    @property
     def select(self):
         """Get formatted SQL select text."""
-        return self._select
+        return self.custom_query
 
     @select.setter
     def select(self, value):
         if isinstance(value, str):
-            if os.path.isfile(value):
-                value = open(value, 'r').read()
-            self._select = to_sql(value)
-        elif value is None:
-            self._select = None
-        pass
+            self.custom_query = value
+
+    @property
+    def text(self):
+        """Get raw SQL text."""
+        return self.assemble()
 
     @property
     def query(self):
-        """Get foramtted SQL text object that can be executed in database."""
-        query = self.parse()
+        """Get formatted SQL text that can be executed in database."""
+        return self.parse()
+
+    def get_table(self):
+        """Get object representing table."""
+        return self.proxy
+
+    def assemble(self):
+        """Build raw SQL statement."""
+        table = self.get_table()
+        insert = table.insert()
+
+        columns = [sa.column(column) for column in self.describe()]
+        select = sa.text(self.select).columns(*columns).alias('s')
+
+        if self.key_field:
+            columns = [*columns, self.key_field.column]
+        select = sa.select(columns).select_from(select)
+
+        select = sa.text(f'\n{self.select}').columns(*columns)
+        query = insert.from_select(columns, select)
+        query = query.compile(compile_kwargs=self.db.ckwargs)
+        query = str(query)
         return query
 
     def parse(self):
-        """Parse into SQL text object."""
-        table = self.object
-        insert = table.insert()
-        columns = [sa.column(column) for column in self.describe()]
-        select = sa.text(f'\n{self.select}').columns(*columns)
-        query = insert.from_select(columns, select)
-        query = str(query)
+        """Parse final SQL statement."""
+        query = self.assemble()
         query = self._format(query)
         query = self._hintinize(query)
         return query
@@ -803,8 +877,54 @@ class Insert(Executable, Model):
         query = self._hintinize(query)
         query = to_sql(f'select * from ({query}) where 1 = 0')
         answerset = conn.execute(query)
-        columns = answerset.keys()
+        columns = [column for column in answerset.keys()]
         return columns
+
+    def delete(self):
+        """Delete table data."""
+        conn = self.db.connect()
+        table = self.get_table()
+        query = table.delete()
+        result = conn.execute(query)
+        logger.info(f'{result.rowcount} {self.table_name} records deleted')
+        pass
+
+    def truncate(self):
+        """Truncate table data."""
+        conn = self.db.engine.connect()
+        query = sa.text(f'truncate table {self.reference}')
+        conn.execute(query)
+        logger.info(f'Table {self.table_name} truncated')
+        pass
+
+    def createlog(self):
+        """Generate special logger."""
+        return self.pipeline.logging.sql.setup()
+
+    def startlog(self, job_id=None, run_id=None, task_id=None, step_id=None,
+                 db_name=None, table_name=None, query_text=None):
+        """Start special logging."""
+        self.logger.root.table.new()
+        self.logger.table(job_id=job_id,
+                          run_id=run_id,
+                          task_id=task_id,
+                          step_id=step_id,
+                          db_name=db_name,
+                          table_name=table_name,
+                          query_type=self.__class__.__name__,
+                          query_text=query_text,
+                          start_date=dt.datetime.now())
+        pass
+
+    def endlog(self, output_rows=None, output_text=None,
+                error_code=None, error_text=None):
+        """End special logging."""
+        self.logger.table(end_date=dt.datetime.now(),
+                          output_rows=output_rows,
+                          output_text=output_text,
+                          error_code=error_code,
+                          error_text=error_text)
+        pass
 
     def _format(self, text):
         text = text.format(task=self.task)
@@ -835,86 +955,21 @@ class Insert(Executable, Model):
             text = str(statements[0])
         return text
 
-    def prepare(self):
-        """Prepare model for ETL operation."""
-        self.logger = self.createlog()
-        if self.cleanup is True:
-            logger.debug(f'Table {self.table_name} will be purged')
-            if self.db.vendor == 'oracle':
-                self.truncate()
-            else:
-                self.delete()
-        pass
-
-    def delete(self):
-        """Delete table data."""
+    def _get_last_value(self):
         conn = self.db.connect()
-        table = self.object
-        query = table.delete()
-        result = conn.execute(query)
-        logger.info(f'{result.rowcount} {self.table_name} records deleted')
-        pass
+        table = self.get_table()
+        value_column = table.c[self.value_field]
+        select = sa.select(sa.func.max(value_column))
+        result = conn.execute(select).scalar()
+        return result
 
-    def truncate(self):
-        """Truncate table data."""
-        conn = self.db.engine.connect()
-        query = sa.text(f'truncate table {self.reference}')
-        conn.execute(query)
-        logger.info(f'Table {self.table_name} truncated')
-        pass
+    def _read_custom_query(self, value):
+        if isinstance(value, str):
+            return read_file_or_string(value)
 
-    def execute(self, step):
-        """Execute action."""
-        conn = self.db.connect()
-        query = self.parse()
-        logger.info(f'Running SQL query...')
-        logger.line(f'-------------------\n{query}\n-------------------')
-        self.startlog(job_id=self.job.id if self.task.job else None,
-                      run_id=self.job.record_id if self.job else None,
-                      task_id=self.task.id,
-                      step_id=step.id,
-                      db_name=self.db.name,
-                      table_name=self.table_name,
-                      query_text=query)
-        try:
-            result = conn.execute(query)
-        except sa.exc.SQLAlchemyError as error:
-            self.endlog(error_text=error.orig.__str__())
-            logger.info(f'SQL query failed')
-            raise error
-        else:
-            self.endlog(output_rows=result.rowcount)
-            logger.info(f'SQL query completed')
-            return result.rowcount
-
-    def createlog(self):
-        """Generate special logger."""
-        return self.pipeline.logging.sql.setup()
-
-    def startlog(self, job_id=None, run_id=None, task_id=None, step_id=None,
-                 db_name=None, table_name=None, query_text=None):
-        """Start special logging."""
-        self.logger.root.table.new()
-        self.logger.table(job_id=job_id,
-                          run_id=run_id,
-                          task_id=task_id,
-                          step_id=step_id,
-                          db_name=db_name,
-                          table_name=table_name,
-                          query_type=self.__class__.__name__,
-                          query_text=query_text,
-                          start_date=dt.datetime.now())
-        pass
-
-    def endlog(self, output_rows=None, output_text=None,
-                error_code=None, error_text=None):
-        """End special logging."""
-        self.logger.table(end_date=dt.datetime.now(),
-                          output_rows=output_rows,
-                          output_text=output_text,
-                          error_code=error_code,
-                          error_text=error_text)
-        pass
+    def _format_custom_query(self, value):
+        if isinstance(value, str):
+            return to_sql(value)
 
     pass
 

@@ -583,6 +583,7 @@ class Job():
         self.name = name or schedule['name']
         self.desc = desc or schedule['desc']
         self.mode = 'A' if args.auto is True else 'M'
+        self.target = None
 
         history = db.tables.run_history
         self.record_id = args.record or record_id
@@ -598,7 +599,6 @@ class Job():
                 self.status = result.status
                 self.reruns = result.rerun_times
                 self.seqno = result.rerun_seqno
-
                 if result.data_dump:
                     self.data = pickle.loads(result.data_dump)
             else:
@@ -651,6 +651,7 @@ class Job():
         act = self.sysinfo.anons[0] if len(self.sysinfo.anons) > 0 else None
         if act is not None:
             if act == 'run':
+                self.target = 'recycle' if self.args.recycle else 'run'
                 self.run()
         pass
 
@@ -1054,13 +1055,15 @@ class Job():
         parser.add_argument('--id', type=int,
                             required=False, help='job unique ID')
         parser.add_argument('--tag', type=int,
-                            required=False, help='job run timestamp')
+                            required=False, help='run timestamp')
         parser.add_argument('--date', type=dt.datetime.fromisoformat,
-                            required=False, help='job run date in ISO format')
+                            required=False, help='run date')
         parser.add_argument('--record', type=int,
-                            required=False, help='job run ID')
+                            required=False, help='run ID')
         parser.add_argument('--trigger', type=int,
                             required=False, help='trigger ID')
+        parser.add_argument('--recycle', action='store_true',
+                            required=False, help='recycle this job')
         parser.add_argument('--solo', action='store_true',
                             required=False, help='do not trigger other jobs')
         parser.add_argument('--mute', action='store_false', default=None,
@@ -1264,7 +1267,11 @@ class Pipeline():
 
     def run(self):
         """Run pipeline."""
-        return self.task.run()
+        return self.task.launch()
+
+    def recycle(self):
+        """Recycle pipeline."""
+        return self.task.recycle()
 
     pass
 
@@ -1447,6 +1454,31 @@ class Task(Process):
         pass
 
     @property
+    def target(self):
+        """Get target action of this task."""
+        if self.job and self.job.target == 'recycle':
+            return self.recycle
+        else:
+            return self.run
+
+    @property
+    def history(self):
+        """Get task history."""
+        if self.job and self.pipeline.date:
+            conn = db.connect()
+            th = db.tables.task_history
+            select = th.select().where(
+                sa.and_(
+                    th.c.job_id == self.job.id,
+                    th.c.task_name == self.name,
+                    th.c.task_date == str(self.pipeline.date)
+                )
+            )
+            result = conn.execute(select)
+            dataset = [dict(record) for record in result]
+            return dataset
+
+    @property
     def records_read(self):
         """Get number of records read."""
         return self._records_read
@@ -1512,16 +1544,42 @@ class Task(Process):
         logger.debug(f'{self} configured in {pipeline}')
         pass
 
+    def launch(self):
+        """Launch task according to target."""
+        return self.target()
+
     def run(self):
-        """Run task."""
+        """Run task from the very first pipeline steps."""
         self._prepare()
         self._start()
         try:
-            self._execute()
+            self._run()
         except Exception:
             self._fail()
         self._end()
         return self.result()
+
+    def recycle(self):
+        """Recycle task."""
+        self.revoke()
+        return self.run()
+
+    def revoke(self):
+        """Revoke task."""
+        if self.job and self.pipeline.date:
+            conn = db.connect()
+            th = db.tables.task_history
+            for record in self.history:
+                record_id = record['id']
+                status = record['status']
+                if status == 'D':
+                    for step in self.pipeline.walk():
+                        if step.last.recyclable:
+                            if step.last.key_field.unit == 'Task':
+                                step.last.recycle(record_id)
+                    update = th.update().values(status='C').\
+                                where(th.c.id == record_id)
+                    conn.execute(update)
 
     def prepare(self):
         """Make all necessary task preparations."""
@@ -1529,21 +1587,6 @@ class Task(Process):
 
     def start(self):
         """Start task."""
-        pass
-
-    def execute(self):
-        """Execute pipeline task from the very first pipeline steps."""
-        for step in self.pipeline.roots:
-            logger.debug(f'Found {step} in roots in {self} for execution')
-            step.to_thread()
-        return self.wait()
-
-    def wait(self):
-        """Wait until all pipeline threads are finished."""
-        for thread in self.pipeline.threads:
-            logger.debug(f'Waiting for {thread.name} in {self} to finish...')
-            thread.join()
-            logger.debug(f'{thread.name} in {self} finished')
         pass
 
     def fail(self):
@@ -1582,10 +1625,20 @@ class Task(Process):
         logger.debug(f'{self} started')
         return self.start()
 
-    def _execute(self):
+    def _run(self):
         logger.info(f'{self} running')
         self.status = 'R'
-        return self.execute()
+        for step in self.pipeline.roots:
+            step.launch()
+        return self._wait()
+
+    def _wait(self):
+        """Wait until all pipeline threads are finished."""
+        for thread in self.pipeline.threads:
+            logger.debug(f'Waiting for {thread.name} in {self} to finish...')
+            thread.join()
+            logger.debug(f'{thread.name} in {self} finished')
+        pass
 
     def _fail(self):
         logger.error()
@@ -1693,31 +1746,42 @@ class Step(Process, Unit):
             return None
 
     @property
-    def graph(self):
-        """Get string representing step structure."""
+    def branch(self):
+        """Get branch with nodes of this step."""
         if self.a is not None and self.b is None and self.c is None:
-            return f'-->{self.a}-->'
+            return [self.a]
         elif self.a is not None and self.b is not None and self.c is None:
-            return f'{self.a}-->{self.b}'
+            return [self.a, self.b]
         elif self.a is not None and self.b is not None and self.c is not None:
-            return f'{self.a}-->{self.b}-->{self.c}'
+            return [self.a, self.b, self.c]
         else:
             return None
 
     @property
     def first(self):
-        """Get first item in the step."""
+        """Get first node in the step."""
         return self.a
 
     @property
     def last(self):
-        """Get last item in the step."""
+        """Get last node in the step."""
         if self.b is None and self.c is None:
             return self.a
         elif self.c is None:
             return self.b
         else:
             return self.c
+
+    @property
+    def figure(self):
+        """Get string representing step branch."""
+        branch = [f'{node.name}' for node in self.branch]
+        if branch and self.type == 'EX':
+            return f'-->{branch[0]}-->'
+        elif branch and self.type in ['EL', 'ETL']:
+            return '-->'.join(branch)
+        else:
+            return None
 
     @property
     def status(self):
@@ -1735,6 +1799,34 @@ class Step(Process, Unit):
             message = (f'status must be str not {value.__class__.__name__}')
             raise TypeError(message)
         pass
+
+    @property
+    def target(self):
+        """Get target action of this step."""
+        if self.job and self.job.target == 'recycle':
+            return self.recycle
+        else:
+            return self.run
+
+    @property
+    def history(self):
+        """Get this step history."""
+        if self.job and self.pipeline.date:
+            conn = db.connect()
+            sh = db.tables.step_history
+            select = sh.select().where(
+                sa.and_(
+                    sh.c.job_id == self.job.id,
+                    sh.c.step_name == self.name,
+                    sh.c.step_date == str(self.pipeline.date),
+                    sh.c.step_a == (self.a.name if self.a else None),
+                    sh.c.step_b == (self.b.name if self.b else None),
+                    sh.c.step_c == (self.c.name if self.c else None)
+                )
+            )
+            result = conn.execute(select)
+            dataset = [dict(record) for record in result]
+            return dataset
 
     @property
     def records_read(self):
@@ -1847,35 +1939,61 @@ class Step(Process, Unit):
         self.pipeline.steps[name] = self
         self.logger = self.pipeline.logging.step.setup(self)
         logger.debug(f'Logger {self.logger.name} is used in {self} logging')
-        logger.debug(f'{self} {self.graph} configured in {pipeline}')
+        logger.debug(f'{self} {self.branch} configured in {pipeline}')
         pass
 
-    def run(self):
-        """Run this step."""
-        self._start()
-        try:
-            self._execute()
-        except Exception:
-            self._fail()
-        self._end()
-        return self.resume()
-
-    def to_thread(self):
-        """Run this step in a separate thread."""
+    def launch(self):
+        """Launch this step in a separate thread."""
         logger.debug(f'Creating thread for {self} in {self.task}...')
         name = f'Step-{self.seqno}'
-        self.thread = th.Thread(name=name, target=self.run, daemon=True)
+        self.thread = th.Thread(name=name, target=self.target, daemon=True)
         logger.debug(f'Created {self.thread.name} for {self} in {self.task}')
         self.pipeline.threads.append(self.thread)
         logger.debug(f'Starting {self.thread.name}...')
         return self.thread.start()
 
     def resume(self):
-        """Proceed task execution in threads of following steps."""
+        """Proceed the process in the threads of the following steps."""
         if self.status == 'D':
             for step in self.last.joins:
-                step.to_thread()
+                step.launch()
         pass
+
+    def run(self):
+        """Run this step."""
+        self._start()
+        try:
+            self._run()
+        except Exception:
+            self._fail()
+        self._end()
+        return self.resume()
+
+    def recycle(self):
+        """Recycle this step."""
+        try:
+            logger.info(f'{self} recycling...')
+            self.revoke()
+            logger.info(f'{self} recycled')
+            return self.run()
+        except Exception:
+            logger.error()
+
+    def revoke(self):
+        """Revoke this step."""
+        if self.job and self.pipeline.date:
+            conn = db.connect()
+            sh = db.tables.step_history
+            for record in self.history:
+                record_id = record['id']
+                status = record['status']
+                if status == 'D':
+                    if self.last.recyclable:
+                        if self.last.key_field.unit == 'Step':
+                            self.last.recycle(record_id)
+                    update = sh.update().values(status='C').\
+                                where(sh.c.id == record_id)
+                    conn.execute(update)
 
     def _start(self):
         logger.info(f'Starting {self}...')
@@ -1902,9 +2020,9 @@ class Step(Process, Unit):
         logger.debug(f'{self} started')
         return atexit.register(self._exit)
 
-    def _execute(self):
+    def _run(self):
         logger.info(f'{self} running')
-        logger.info(f'{self} is {self.type} operation: {self.graph}')
+        logger.info(f'{self} is {self.type} operation: {self.branch}')
         self.status = 'R'
         if self.type == 'ETL':
             self.c.prepare()
