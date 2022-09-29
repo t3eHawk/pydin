@@ -763,6 +763,68 @@ class Job():
             return None
         pass
 
+    @property
+    def pipeline(self):
+        """Build pipeline for this job if configured."""
+        if self.configured:
+            nodes = []
+            models = imp.import_module('devoe.models')
+            variables = imp.import_module('devoe.vars')
+            for record in self.configuration:
+                source_name = record['source_name']
+                node_name = record['node_name']
+                node_type = record['node_type']
+                node_config = json.loads(record['node_config'])
+                custom_query = record['custom_query']
+
+                date_field = record['date_field']
+                days_back = record['days_back']
+                hours_back = record['hours_back']
+                months_back = record['months_back']
+                timezone = record['timezone']
+                value_field = record['value_field']
+
+                key_name = record['key_field']
+                key_field = getattr(variables, key_name) if key_name else None
+
+                chunk_size = record['chunk_size']
+                cleanup = True if record['cleanup'] else False
+
+                constructor = getattr(models, node_type)
+                node = constructor(model_name=node_name,
+                                   source_name=source_name,
+                                   custom_query=custom_query,
+                                   date_field=date_field,
+                                   days_back=days_back,
+                                   hours_back=hours_back,
+                                   months_back=months_back,
+                                   timezone=timezone,
+                                   value_field=value_field,
+                                   key_field=key_field,
+                                   chunk_size=chunk_size,
+                                   cleanup=cleanup,
+                                   **node_config)
+                nodes.append(node)
+            return Pipeline(*nodes)
+
+    @property
+    def configured(self):
+        """Check if job configured."""
+        return True if self.configuration else False
+
+    @property
+    def configuration(self):
+        """Get job configuration."""
+        conn = db.connect()
+        jc = db.tables.job_config
+        select = jc.select().where(jc.c.job_id == self.id).\
+                             order_by(jc.c.node_seqno)
+        result = conn.execute(select)
+        if result:
+            return [dict(record) for record in result]
+        else:
+            return None
+
     @classmethod
     def get(cls):
         """Get existing job from current execution."""
@@ -907,13 +969,18 @@ class Job():
         logger.info(f'{self} runs...')
         self.status = 'R'
         self.record.write(status=self.status)
+        if self.configured:
+            logger.debug(f'{self} pipeline now will be performed')
+            self.pipeline.run()
+            logger.debug(f'{self} pipeline performed')
+        else:
         name = 'script'
-        file = f'{self.path}/script.py'
-        logger.debug(f'{self} script {file=} now will be executed')
-        spec = impu.spec_from_file_location(name, file)
+            path = f'{self.path}/script.py'
+            logger.debug(f'{self} script {path=} now will be executed')
+            spec = impu.spec_from_file_location(name, path)
         module = impu.module_from_spec(spec)
         spec.loader.exec_module(module)
-        logger.debug(f'{self} script {file=} executed')
+            logger.debug(f'{self} script {path=} executed')
         pass
 
     def _fail(self):

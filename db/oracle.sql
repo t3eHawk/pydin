@@ -192,9 +192,9 @@ create table de_sql_log (
   run_id      number(*, 0),
   task_id     number(*, 0),
   step_id     number(*, 0),
-  db_name     varchar2(128 char),
-  schema_name varchar2(128 char),
-  table_name  varchar2(128 char),
+  db_name     varchar2(100 char),
+  schema_name varchar2(100 char),
+  table_name  varchar2(100 char),
   query_type  varchar2(10 char),
   query_text  varchar2(4000 char),
   start_date  date,
@@ -235,3 +235,23 @@ create table de_components (
 insert into de_components (id) values ('SCHEDULER');
 insert into de_components (id) values ('RESTAPI');
 commit;
+
+create table de_job_config (
+  job_id       number(*, 0) not null,
+  node_seqno   number(*, 0) not null,
+  node_name    varchar2(100 char),
+  node_desc    varchar2(200 char),
+  node_type    varchar2(50 char),
+  node_config  varchar2(4000 char),
+  source_name  varchar2(100 char) not null,
+  custom_query varchar2(4000 char),
+  date_field   varchar2(50 char),
+  days_back    number(*, 0),
+  hours_back   number(*, 0),
+  months_back  number(*, 0),
+  timezone     varchar2(50 char),
+  value_field  varchar2(50 char),
+  key_field    varchar2(50 char),
+  chunk_size   number(*, 0) default 1000,
+  cleanup      varchar2(1 char)
+);

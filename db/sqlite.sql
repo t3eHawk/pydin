@@ -150,3 +150,23 @@ create table de_components (
 insert into de_components (id) values ('SCHEDULER');
 insert into de_components (id) values ('RESTAPI');
 commit;
+
+create table de_job_config (
+  job_id       integer not null,
+  node_seqno   integer not null,
+  node_name    text,
+  node_desc    text,
+  node_type    text,
+  node_config  text,
+  source_name  text not null,
+  custom_query text,
+  date_field   text,
+  days_back    integer,
+  hours_back   integer,
+  months_back  integer,
+  timezone     text,
+  value_field  text,
+  key_field    text,
+  chunk_size   integer default 1000,
+  cleanup      text
+);
