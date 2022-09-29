@@ -33,19 +33,24 @@ class Manager():
                          alarming=False)
 
         # If argv more than one then command was entered.
-        argv = [arg for arg in sys.argv if arg.startswith('-') is False]
-        if len(argv) == 1:
+        command = [arg for arg in sys.argv if arg.startswith('-') is False]
+        self.parse(command)
+        pass
+
+    def parse(self, command):
+        """Parse and execute command."""
+        if len(command) == 1:
             self.help()
-        elif len(argv) == 2 and argv[1] == 'help':
+        elif len(command) == 2 and command[1] == 'help':
             self.help()
-        elif len(argv) > 2 and argv[-1] == 'help':
-            name = '_'.join(argv[1:3])
+        elif len(command) > 2 and command[-1] == 'help':
+            name = '_'.join(command[1:3])
             self.help(name=name)
-        elif len(argv) > 2:
+        elif len(command) > 2:
             # Read command. Command length is two words as maximum.
             try:
-                name = '_'.join(argv[1:3])
-                args = argv[3:] if len(argv) > 3 else []
+                name = '_'.join(command[1:3])
+                args = command[3:] if len(command) > 3 else []
                 func = getattr(self, name)
             except AttributeError:
                 self.unknown()
@@ -63,12 +68,12 @@ class Manager():
                 except Exception:
                     logger.error()
 
-        pass
-
     def help(self, name=None):
         """Show help note for all available commands."""
         if name == 'help' or name is None:
-            funcs = ['create_scheduler', 'start_scheduler', 'stop_scheduler',
+            funcs = ['start_console',
+                     'create_scheduler',
+                     'start_scheduler', 'stop_scheduler',
                      'restart_scheduler',
                      'create_job', 'edit_script',
                      'configure_job',
@@ -102,6 +107,22 @@ class Manager():
     def unknown(self):
         """Print message about unknown command."""
         print('Unknown command. Type *help* to get list of commands.')
+        pass
+
+    def start_console(self):
+        """Start interactive console."""
+        print('Hello there!')
+        while True:
+            now = dt.datetime.now()
+            command = input(f'{now:%H:%M} $ ')
+            if command == 'quit':
+                break
+            elif command == '':
+                continue
+            else:
+                command = ['manager.py', *command.split()]
+                self.parse(command)
+        print('Good bye!')
         pass
 
     def create_scheduler(self):
