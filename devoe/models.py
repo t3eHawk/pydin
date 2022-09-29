@@ -36,8 +36,9 @@ class Model(Node):
     executable = False
 
     def __init__(self, *args, model_name=None, source_name=None,
-                 chunk_size=1000, cleanup=False, key_field=None, **kwargs):
+                 key_field=None, chunk_size=1000, cleanup=False, **kwargs):
         super().__init__(node_name=model_name, source_name=source_name)
+        self.key_field = key_field(self) if key_field else None
         self.chunk_size = chunk_size
         self.cleanup = cleanup
         self.key_field = key_field
@@ -53,6 +54,15 @@ class Model(Node):
     def model_name(self, value):
         self.name = value
         pass
+
+    @property
+    def key_field(self):
+        """Key field of this model."""
+        return self._key_field
+
+    @key_field.setter
+    def key_field(self, value):
+        self._key_field = value
 
     def configure(self):
         """Configure this ETL model."""
