@@ -1,4 +1,4 @@
-"""Contains model prototypes and built-in models."""
+"""Contains built-in models and prototypes."""
 
 import csv
 import datetime as dt
@@ -37,7 +37,7 @@ class Model(Node):
     executable = False
 
     def __init__(self, *args, model_name=None, source_name=None,
-                 date_field=None, days_back=None,
+                 custom_query=None, date_field=None, days_back=None,
                  hours_back=None, months_back=None, timezone=None,
                  value_field=None, target_value=None,
                  min_value=None, max_value=None,
@@ -163,7 +163,7 @@ class Model(Node):
     def configure(self):
         """Configure this ETL model."""
         if self:
-            raise NotImplemented
+            raise NotImplementedError
 
     def prepare(self):
         """Do something with this ETL model before run."""
@@ -176,16 +176,17 @@ class Model(Node):
     def create(self):
         """Create corresponding object in the data source."""
         if self:
-            raise NotImplemented
+            raise NotImplementedError
 
     def remove(self):
         """Remove corresponding object from the data source."""
         if self:
-            raise NotImplemented
+            raise NotImplementedError
 
     def clean(self):
         """Clean all data in the corresponding object."""
         if self:
+            raise NotImplementedError
 
     def get_last_value(self):
         """Get last loaded value of this model."""
@@ -249,7 +250,7 @@ class Extractable():
 
     def extract(self):
         if self:
-            raise NotImplemented
+            raise NotImplementedError
 
     pass
 
@@ -294,7 +295,7 @@ class Transformable():
 
     def transform(self):
         if self:
-            raise NotImplemented
+            raise NotImplementedError
 
     pass
 
@@ -337,7 +338,7 @@ class Loadable():
 
     def load(self):
         if self:
-            raise NotImplemented
+            raise NotImplementedError
 
     pass
 
@@ -370,7 +371,7 @@ class Executable():
 
     def execute(self):
         if self:
-            raise NotImplemented
+            raise NotImplementedError
 
     pass
 
@@ -378,8 +379,10 @@ class Executable():
 class Mapper(Transformable, Model):
     """Represents basic mapper used for data transformation."""
 
-    def configure(self):
+    def configure(self, func=None):
         """Configure transformation."""
+        if func:
+            self.transform = func
         pass
 
     def transform(self, input):

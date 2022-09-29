@@ -601,6 +601,8 @@ class Job():
                 self.seqno = result.rerun_seqno
                 if result.data_dump:
                     self.data = pickle.loads(result.data_dump)
+                else:
+                    self.data = types.SimpleNamespace()
             else:
                 run = f'run[{self.record_id}]'
                 message = f'no such {self} having {run}'
@@ -614,9 +616,8 @@ class Job():
             self.status = None
             self.reruns = None
             self.seqno = None
-
             self.data = types.SimpleNamespace()
-            self.errors = set()
+        self.errors = set()
 
         self.trigger_id = args.trigger or trigger_id
         self.trigger = db.record(history, self.trigger_id)
@@ -975,12 +976,12 @@ class Job():
             self.pipeline.run()
             logger.debug(f'{self} pipeline performed')
         else:
-        name = 'script'
+            name = 'script'
             path = f'{self.path}/script.py'
             logger.debug(f'{self} script {path=} now will be executed')
             spec = impu.spec_from_file_location(name, path)
-        module = impu.module_from_spec(spec)
-        spec.loader.exec_module(module)
+            module = impu.module_from_spec(spec)
+            spec.loader.exec_module(module)
             logger.debug(f'{self} script {path=} executed')
         pass
 
@@ -1151,7 +1152,7 @@ class Pipeline():
     """Represents ETL pipeline."""
 
     def __init__(self, *nodes, name=None, date=None, logging=None):
-        self.name = name or __class__.__name__
+        self.name = name or self.__class__.__name__
         self.date = date
 
         self.task = Task()
@@ -1351,7 +1352,7 @@ class Unit():
     def job(self):
         """Get process job ID."""
         if self.pipeline and self.pipeline.job:
-                return self.pipeline.job
+            return self.pipeline.job
 
     @property
     def unit_name(self):
