@@ -694,7 +694,7 @@ class Connector(dict):
                 password = options.get('password')
                 host = options.get('host')
                 port = options.get('port')
-                
+
                 if is_path(database):
                     path = os.path.abspath(database)
                     database = None
@@ -787,6 +787,18 @@ class Calendar():
             """Represent object as a datetime string."""
             return str(self.now)
 
+        def __getattribute__(self, name):
+            if '(' in name and name.endswith(')'):
+                func_name = name[:name.index('(')]
+                if hasattr(self, func_name):
+                    expression = f'self.{name}'
+                    attribute = eval(expression)
+                    return attribute
+                else:
+                    return super().__getattribute__(name)
+            else:
+                return super().__getattribute__(name)
+
         class value():
             """Represents wrapper used to calculate final date value."""
 
@@ -829,6 +841,28 @@ class Calendar():
         def end(self):
             """Get end of current date."""
             return self._end
+
+        @property
+        def timezone(self):
+            return self._timezone
+
+        @timezone.setter
+        def timezone(self, value):
+            if value is None or value is dt.timezone.utc:
+                self._timezone = value
+            elif isinstance(value, int):
+                timezone = dt.timezone(dt.timedelta(hours=value))
+                self._timezone = timezone
+            elif isinstance(value, str):
+                if value.upper() == 'UTC':
+                    self._timezone = dt.timezone.utc
+                elif value.isdigit():
+                    hours = int(value)
+                    self._timezone = dt.timezone(dt.timedelta(hours=hours))
+            elif isinstance(value, (list, tuple)):
+                hours, minutes = value[0], value[1]
+                timedelta = dt.timedelta(hours=hours, minutes=minutes)
+                self._timezone = dt.timezone(timedelta)
 
         @property
         def prev(self):
@@ -890,9 +924,14 @@ class Calendar():
             return self.tomorrow
 
         @property
-        def hh(self):
-            """Shortcut for hour."""
-            return self.hour
+        def y(self):
+            """Shortcut for year."""
+            return self.year
+
+        @property
+        def dd(self):
+            """Shortcut for day."""
+            return self
 
         @property
         def mm(self):
@@ -900,9 +939,9 @@ class Calendar():
             return self.month
 
         @property
-        def yyyy(self):
-            """Shortcut for year."""
-            return self.year
+        def hh(self):
+            """Shortcut for hour."""
+            return self.hour
 
         @property
         def pv(self):
@@ -913,6 +952,49 @@ class Calendar():
         def nt(self):
             """Shrotcut for next."""
             return self.next
+
+        def days_back(self, delta):
+            delta = dt.timedelta(days=delta)
+            now = self._now-delta
+            return Calendar.Day(now)
+
+        def hours_back(self, delta):
+            delta = dt.timedelta(hours=delta)
+            now = self._now-delta
+            return Calendar.Hour(now)
+
+        def minutes_back(self, delta):
+            delta = dt.timedelta(minutes=delta)
+            now = self._now-delta
+            return Calendar.Day(now)
+
+        def seconds_back(self, delta):
+            delta = dt.timedelta(seconds=delta)
+            now = self._now-delta
+            return Calendar.Day(now)
+
+        def months_back(self, delta):
+            now = self.now
+            while delta > 0:
+                delta -= 1
+                now = now.replace(day=1)-dt.timedelta(days=1)
+            return Calendar.Month(now)
+
+        def week_back(self, delta):
+            pass
+
+        def years_back(self, delta):
+            pass
+
+        def minutes_round(self, level):
+            date = self._now
+            micro = date.microsecond
+            seconds = date.second
+            minutes = date.minute % level
+            delta = dt.timedelta(seconds=seconds, minutes=minutes,
+                                 microseconds=micro)
+            now = date-delta
+            return Calendar.Date(now)
 
         pass
 
@@ -1008,6 +1090,11 @@ class Calendar():
             """Get previous month."""
             now = self._now.replace(day=1)-dt.timedelta(days=1)
             return Calendar.Month(now)
+
+        pass
+
+    class Week(Date):
+        """Represents certain week."""
 
         pass
 

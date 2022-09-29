@@ -36,8 +36,16 @@ class Model(Node):
     executable = False
 
     def __init__(self, *args, model_name=None, source_name=None,
+                 date_field=None, days_back=None,
+                 hours_back=None, months_back=None, timezone=None,
                  key_field=None, chunk_size=1000, cleanup=False, **kwargs):
         super().__init__(node_name=model_name, source_name=source_name)
+        if date_field:
+            self.date_field = date_field
+            self.days_back = days_back
+            self.hours_back = hours_back
+            self.months_back = months_back
+            self.timezone = timezone
         self.key_field = key_field(self) if key_field else None
         self.chunk_size = chunk_size
         self.cleanup = cleanup
@@ -63,6 +71,45 @@ class Model(Node):
     def key_field(self, value):
         self._key_field = value
 
+    @property
+    def date_field(self):
+        """Key field of this model."""
+        if hasattr(self, '_date_field'):
+            return self._date_field
+
+    @date_field.setter
+    def date_field(self, value):
+        self._date_field = value
+
+    @property
+    def target_date(self):
+        """Target date of this model."""
+        if hasattr(self, 'date_field'):
+            date = self.pipeline.calendar
+
+            if self.days_back:
+                date = date.days_back(self.days_back)
+            elif self.hours_back:
+                date = date.hours_back(self.hours_back)
+            elif self.months_back:
+                date = date.months_back(self.months_back)
+
+            if self.timezone:
+                date.timezone = self.timezone
+
+            return date
+
+    @property
+    def date_from(self):
+        """The beggining of the target date of this model."""
+        if hasattr(self, 'date_field'):
+            return self.target_date.start
+
+    @property
+    def date_to(self):
+        """The end of the target date of this model."""
+        if hasattr(self, 'date_field'):
+            return self.target_date.end
     @property
     def recyclable(self):
         if hasattr(self, 'recycle'):
@@ -856,7 +903,11 @@ class Insert(Executable, Model):
             columns = [*columns, self.key_field.column]
         select = sa.select(columns).select_from(select)
 
-        select = sa.text(f'\n{self.select}').columns(*columns)
+        if self.date_field:
+            date_column = sa.column(self.date_field)
+            between = sa.between(date_column, self.date_from, self.date_to)
+            select = select.where(between)
+
         query = insert.from_select(columns, select)
         query = query.compile(compile_kwargs=self.db.ckwargs)
         query = str(query)
