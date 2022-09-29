@@ -38,6 +38,8 @@ class Model(Node):
     def __init__(self, *args, model_name=None, source_name=None,
                  date_field=None, days_back=None,
                  hours_back=None, months_back=None, timezone=None,
+                 value_field=None, target_value=None,
+                 min_value=None, max_value=None,
                  key_field=None, chunk_size=1000, cleanup=False, **kwargs):
         super().__init__(node_name=model_name, source_name=source_name)
         if date_field:
@@ -46,6 +48,10 @@ class Model(Node):
             self.hours_back = hours_back
             self.months_back = months_back
             self.timezone = timezone
+        if value_field:
+            self.value_field = value_field
+            self.target_value = target_value
+            self.min_value, self.max_value = min_value, max_value
         self.key_field = key_field(self) if key_field else None
         self.chunk_size = chunk_size
         self.cleanup = cleanup
@@ -110,6 +116,28 @@ class Model(Node):
         """The end of the target date of this model."""
         if hasattr(self, 'date_field'):
             return self.target_date.end
+
+    @property
+    def value_field(self):
+        """Key field of this model."""
+        if hasattr(self, '_value_field'):
+            return self._value_field
+
+    @value_field.setter
+    def value_field(self, value):
+        self._value_field = value
+
+    @property
+    def last_value(self):
+        """."""
+        if hasattr(self, 'value_field'):
+            if self.target_value:
+                return self.target_value
+            elif self.min_value and self.max_value:
+                return [self.min_value, self.max_value]
+            else:
+                return self.get_last_value()
+
     @property
     def recyclable(self):
         if hasattr(self, 'recycle'):
@@ -143,7 +171,11 @@ class Model(Node):
     def clean(self):
         """Clean all data in the corresponding object."""
         if self:
-            raise NotImplemented
+
+    def get_last_value(self):
+        """Get last loaded value of this model."""
+        if hasattr(self, 'value_field'):
+            return self._get_last_value()
 
     def explain(self, parameter_name=None):
         """Get model or chosen parameter description."""
@@ -907,6 +939,11 @@ class Insert(Executable, Model):
             date_column = sa.column(self.date_field)
             between = sa.between(date_column, self.date_from, self.date_to)
             select = select.where(between)
+
+        if self.value_field:
+            last_value = self.get_last_value()
+            value_column = sa.column(self.value_field)
+            select = select.where(value_column > last_value)
 
         query = insert.from_select(columns, select)
         query = query.compile(compile_kwargs=self.db.ckwargs)
