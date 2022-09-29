@@ -45,28 +45,21 @@ class Database(pe.Database):
 
         def __init__(self, database):
             self.database = database
+            self.schedule = self.load('de_schedule')
+            self.components = self.load('de_components')
+            self.run_history = self.load('de_run_history')
+            self.task_history = self.load('de_task_history')
+            self.step_history = self.load('de_step_history')
+            self.sql_log = self.load('de_sql_log')
+            self.file_log = self.load('de_file_log')
+            self.job_config = self.load('de_job_config')
             pass
 
-        @property
-        def schedule(self):
-            """SCHEDULE table."""
-            if hasattr(self, '_schedule') is False:
-                self._schedule = self.database.table('de_schedule')
-            return self._schedule
+        def load(self, table_name=None):
+            if table_name:
+                return self.database.table(table_name)
 
-        @property
-        def run_history(self):
-            """RUN_HISTORY table."""
-            if hasattr(self, '_run_history') is False:
-                self._run_history = self.database.table('de_run_history')
-            return self._run_history
-
-        @property
-        def components(self):
-            """COMPONENTS table."""
-            if hasattr(self, '_components') is False:
-                self._components = self.database.table('de_components')
-            return self._components
+        pass
 
     class Record():
         """."""
@@ -135,7 +128,6 @@ class Database(pe.Database):
     def deploy(self):
         """Deploy application database schema."""
         raise NotImplementedError
-        pass
 
     def normalize(self, job=None, description=None, status=None,
                   monthday=None, weekday=None,

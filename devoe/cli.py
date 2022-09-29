@@ -28,7 +28,8 @@ class Manager():
         self.output = args.output
         self.error = args.error
 
-        logger.configure(file=False, format='[{rectype}] {message}\n',
+        logger.configure(status=False, file=False, console=False,
+                         format='[{rectype}] {message}\n',
                          alarming=False)
 
         # If argv more than one then command was entered.

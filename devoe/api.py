@@ -27,7 +27,9 @@ class Driver():
         self.root = locate() if root is None else os.path.abspath(root)
         self.jobs = os.path.join(self.root, 'jobs')
 
-        logger.configure(file=False, alarming=False)
+        logger.configure(status=False, file=False, console=False,
+                         format='[{rectype}] {message}\n',
+                         alarming=False)
         pass
 
     def create_scheduler(self, name=None, desc=None, path=None):
