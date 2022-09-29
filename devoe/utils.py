@@ -196,3 +196,11 @@ def is_path(string):
         return True
     else:
         return False
+
+
+def read_file_or_string(value):
+    """Read content from file or string."""
+    if os.path.isfile(value):
+        return open(value, 'r').read()
+    else:
+        return value

@@ -23,6 +23,7 @@ from .logger import logger
 
 from .utils import to_sql
 from .utils import coalesce
+from .utils import read_file_or_string
 
 from .core import Node
 
@@ -42,6 +43,7 @@ class Model(Node):
                  min_value=None, max_value=None,
                  key_field=None, chunk_size=1000, cleanup=False, **kwargs):
         super().__init__(node_name=model_name, source_name=source_name)
+        self.custom_query = custom_query
         if date_field:
             self.date_field = date_field
             self.days_back = days_back
@@ -139,6 +141,19 @@ class Model(Node):
                 return self.get_last_value()
 
     @property
+    def custom_query(self):
+        return self._custom_query
+
+    @custom_query.setter
+    def custom_query(self, value):
+        if isinstance(value, str):
+            value = self.read_custom_query(value)
+            value = self.format_custom_query(value)
+            self._custom_query = value
+        else:
+            self._custom_query = None
+
+    @property
     def recyclable(self):
         if hasattr(self, 'recycle'):
             return True
@@ -176,6 +191,22 @@ class Model(Node):
         """Get last loaded value of this model."""
         if hasattr(self, 'value_field'):
             return self._get_last_value()
+
+    def read_custom_query(self, value):
+        """Read custom query."""
+        if isinstance(value, str):
+            if hasattr(self, '_read_custom_query'):
+                return self._read_custom_query(value)
+            else:
+                return value
+
+    def format_custom_query(self, value):
+        """Format custom query."""
+        if isinstance(value, str):
+            if hasattr(self, '_format_custom_query'):
+                return self._format_custom_query(value)
+            else:
+                return value
 
     def explain(self, parameter_name=None):
         """Get model or chosen parameter description."""
