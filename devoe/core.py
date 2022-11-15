@@ -148,7 +148,7 @@ class Scheduler():
             return self.waking_up.set()
 
     def count_running(self, id):
-        """Get the number of currently running job instances."""
+        """Get the number of currently running jobs."""
         conn = db.connect()
         table = db.tables.run_history
         select = sa.select(sa.func.count()).select_from(table).where(
@@ -159,6 +159,23 @@ class Scheduler():
         )
         select = select.where(table.c.job_id == id)
         result = conn.execute(select).scalar()
+        return result
+
+    def count_failed(self):
+        """Get the total number of failed jobs."""
+        h = db.tables.run_history
+        select = (sa.select([sa.func.count()]).select_from(h).
+                  where(sa.and_(h.c.status.in_(['E', 'T']),
+                                h.c.rerun_id.is_(None),
+                                h.c.rerun_now.is_(None),
+                                h.c.rerun_done.is_(None))))
+        conn = db.connect()
+        result = conn.execute(select).scalar()
+        return result
+
+    def count_sleeping(self):
+        """Get the current number of sleeping jobs."""
+        result = sum((len(jobs) for jobs in self.waiting_lists.values()))
         return result
 
     def list_failed_jobs(self):
@@ -247,7 +264,7 @@ class Scheduler():
 
     def _active(self):
         # Run active scheduler phase.
-        self._maintain()
+        self._maintenance()
         self._walk()
         pass
 
@@ -282,26 +299,23 @@ class Scheduler():
         self.moment += 1
         pass
 
-    def _maintain(self):
+    def _maintenance(self):
         # Perform maintenance steps.
         # Update schedule if needed.
         interval = config['SCHEDULER'].get('reschedule')
         if int(self.moment) % interval == 0:
-            logger.debug('Schedule will be refreshed now')
+            logger.debug('Schedule refresh procedure initiates right now')
             self.read()
-            logger.info('Schedule refreshed')
         # Rerun failed jobs.
         interval = config['SCHEDULER'].get('rerun')
         if int(self.moment) % interval == 0:
-            logger.debug('Rerun procedure will be initiated now')
+            logger.debug('Rerun procedure initiates right now')
             self.rerun()
-            logger.info('Rerun procedure initiated')
         # Finalize postponed jobs.
         interval = config['SCHEDULER'].get('wakeup')
         if int(self.moment) % interval == 0:
-            logger.debug('Wake Up procedure will be initiated now')
+            logger.debug('Wake Up procedure initiates right now')
             self.wake_up()
-            logger.info('Wake Up procedure initiated')
         pass
 
     def _read(self):
@@ -344,7 +358,6 @@ class Scheduler():
                 logger.warning()
                 continue
             else:
-                logger.debug(f'Got Job {job}')
                 yield job
         logger.debug('Schedule retrieved')
         pass
@@ -374,13 +387,18 @@ class Scheduler():
         # Read and update in-memory schedule if necessary.
         while True:
             if self.reading.is_set():
-                self._read()
+                try:
+                    self._read()
+                except Exception:
+                    logger.error()
+                finally:
+                    self.reading.clear()
             tm.sleep(1)
 
     def _rerun(self):
         # Define failed runs and send them on re-execution.
         while True:
-            if self.resurrection.is_set():
+            if self.resurrection.is_set() and self.count_failed():
                 logger.debug('Rerun procedure starts...')
                 try:
                     failed_jobs = self.list_failed_jobs()
@@ -397,7 +415,7 @@ class Scheduler():
     def _wake_up(self):
         # Define runs to be woken up from sleep and then executed.
         while True:
-            if self.waking_up.is_set():
+            if self.waking_up.is_set() and self.count_sleeping():
                 logger.debug('Wake Up procedure starts...')
                 for queue in self.waiting_lists.values():
                     if queue:
@@ -675,7 +693,7 @@ class Scheduler():
         # Configure all necessary threads.
         logger.debug('Making threads for this scheduler...')
 
-        targets = [self._read, self._rerun, self._wake_up]
+        targets = [self._reader, self._rerun, self._wake_up]
         for i, target in enumerate(targets):
             name = f'Daemon-{i}'
             thread = th.Thread(name=name, target=target, daemon=True)
