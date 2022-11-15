@@ -55,12 +55,14 @@ class Driver():
             raise Exception(f'file {dest} already exists!')
         config_path = os.path.join(root, 'devoe.ini')
         config_local = configparser.ConfigParser()
-        config_dict = {'SCHEDULER': {'name': name or '',
-                                     'desc': desc or '',
-                                     'chargers': '5',
-                                     'executors': '20',
-                                     'reschedule': '60',
-                                     'rerun': '3600'},
+        config_dict = {'SCHEDULER': {'scheduler_name': name or '',
+                                     'scheduler_desc': desc or '',
+                                     'chargers_number': '5',
+                                     'executors_number': '20',
+                                     'refresh_interval': '300',
+                                     'rerun_interval': '3600',
+                                     'wakeup_interval': '60'
+                                     },
                        'LOGGING': {'console': 'True',
                                    'file': 'True',
                                    'info': 'True',
@@ -154,24 +156,27 @@ class Driver():
     def create_job(self, name=None, desc=None, mday=None, wday=None,
                    hour=None, min=None, sec=None, tgid=None,
                    start_date=None, end_date=None, env=None, args=None,
-                   timeout=None, maxreruns=None, maxdays=None,
-                   alarm=None, recipients=None, debug=None, norepo=False):
+                   timeout=None, rerun_limit=None, rerun_days=None,
+                   alarm=None, email_list=None, debug=None, norepo=False):
         """Create job with all necessary elements."""
         logger.debug('Creating job...')
         conn = db.connect()
         table = db.tables.schedule
-        values = db.normalize(job=name, description=desc, status=False,
+        values = db.normalize(job_name=name,
+                              job_description=desc,
+                              status=False,
                               monthday=mday, weekday=wday,
                               hour=hour, minute=min, second=sec,
                               trigger_id=tgid,
                               start_date=start_date,
                               end_date=end_date,
-                              environment=env, arguments=args,
+                              environment=env,
+                              arguments=args,
                               timeout=timeout,
-                              maxreruns=maxreruns,
-                              maxdays=maxdays,
+                              rerun_limit=rerun_limit,
+                              rerun_days=rerun_days,
                               alarm=alarm,
-                              recipients=recipients,
+                              email_list=email_list,
                               debug=debug)
         logger.debug(f'Configuring schedule record with {values=}')
         insert = table.insert().values(**values)
@@ -230,25 +235,27 @@ class Driver():
     def configure_job(self, id, name=None, desc=None, mday=None, wday=None,
                       hour=None, min=None, sec=None, tgid=None,
                       start_date=None, end_date=None, env=None, args=None,
-                      timeout=None, maxreruns=None, maxdays=None,
-                      alarm=None, recipients=None, debug=None):
+                      timeout=None, rerun_limit=None, rerun_days=None,
+                      alarm=None, email_list=None, debug=None):
         """Modify job configuration."""
         repr = f'Job[{id}]'
         logger.debug(f'Editing {repr}...')
         conn = db.connect()
         table = db.tables.schedule
-        values = db.normalize(job=name, description=desc,
+        values = db.normalize(job_name=name,
+                              job_description=desc,
                               monthday=mday, weekday=wday,
                               hour=hour, minute=min, second=sec,
                               trigger_id=tgid,
                               start_date=start_date,
                               end_date=end_date,
-                              environment=env, arguments=args,
+                              environment=env,
+                              arguments=args,
                               timeout=timeout,
-                              maxreruns=maxreruns,
-                              maxdays=maxdays,
+                              rerun_limit=rerun_limit,
+                              rerun_days=rerun_days,
                               alarm=alarm,
-                              recipients=recipients,
+                              email_list=email_list,
                               debug=debug)
         if len(values) > 0:
             logger.debug(f'Configuring schedule record with {values=}')

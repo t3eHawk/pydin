@@ -129,18 +129,18 @@ class Database(pe.Database):
         """Deploy application database schema."""
         raise NotImplementedError
 
-    def normalize(self, job=None, description=None, status=None,
+    def normalize(self, job_name=None, job_description=None, status=None,
                   monthday=None, weekday=None,
                   hour=None, minute=None, second=None, trigger_id=None,
                   start_date=None, end_date=None,
                   environment=None, arguments=None, timeout=None,
-                  maxreruns=None, maxdays=None,
-                  alarm=None, recipients=None, debug=None):
+                  rerun_limit=None, rerun_days=None,
+                  alarm=None, email_list=None, debug=None):
         """Normalize parameters in accordance with their data types."""
         values = {}
-        setup = [{'column': 'job', 'value': job,
+        setup = [{'column': 'job_name', 'value': job_name,
                   'types': (str,)},
-                 {'column': 'description', 'value': description,
+                 {'column': 'job_description', 'value': job_description,
                   'types': (str,)},
                  {'column': 'status', 'value': status,
                   'types': (bool, ),
@@ -151,7 +151,7 @@ class Database(pe.Database):
                   'types': (int, str)},
                  {'column': 'hour', 'value': hour,
                   'types': (int, str)},
-                 {'column': 'minute', 'value': min,
+                 {'column': 'minute', 'value': minute,
                   'types': (int, str)},
                  {'column': 'second', 'value': second,
                   'types': (int, str)},
@@ -167,14 +167,14 @@ class Database(pe.Database):
                   'types': (str,)},
                  {'column': 'timeout', 'value': timeout,
                   'types': (int,)},
-                 {'column': 'maxreruns', 'value': maxreruns,
+                 {'column': 'rerun_limit', 'value': rerun_limit,
                   'types': (int,)},
-                 {'column': 'maxdays', 'value': maxdays,
+                 {'column': 'rerun_days', 'value': rerun_days,
                   'types': (int,)},
                  {'column': 'alarm', 'value': alarm,
                   'types': (bool,),
                   'norm_func': lambda arg: 'Y' if arg is True else self.null},
-                 {'column': 'recipients', 'value': recipients,
+                 {'column': 'email_list', 'value': email_list,
                   'types': (str,)},
                  {'column': 'debug', 'value': debug,
                   'types': (bool,),

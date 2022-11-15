@@ -184,9 +184,9 @@ class Scheduler():
         s = db.tables.schedule
         select = (sa.select([h.c.id, h.c.job_id, h.c.run_tag,
                              h.c.added, h.c.rerun_times,
+                             s.c.rerun_limit, s.c.rerun_days,
                              s.c.status, s.c.start_date, s.c.end_date,
-                             s.c.environment, s.c.arguments,
-                             s.c.timeout, s.c.maxreruns, s.c.maxdays]).
+                             s.c.environment, s.c.arguments, s.c.timeout]).
                   select_from(sa.join(h, s, h.c.job_id == s.c.id)).
                   where(sa.and_(h.c.status.in_(['E', 'T']),
                                 h.c.rerun_id.is_(None),
@@ -302,17 +302,17 @@ class Scheduler():
     def _maintenance(self):
         # Perform maintenance steps.
         # Update schedule if needed.
-        interval = config['SCHEDULER'].get('reschedule')
+        interval = config['SCHEDULER']['refresh_interval']
         if int(self.moment) % interval == 0:
             logger.debug('Schedule refresh procedure initiates right now')
             self.read()
         # Rerun failed jobs.
-        interval = config['SCHEDULER'].get('rerun')
+        interval = config['SCHEDULER']['rerun_interval']
         if int(self.moment) % interval == 0:
             logger.debug('Rerun procedure initiates right now')
             self.rerun()
         # Finalize postponed jobs.
-        interval = config['SCHEDULER'].get('wakeup')
+        interval = config['SCHEDULER']['wakeup_interval']
         if int(self.moment) % interval == 0:
             logger.debug('Wake Up procedure initiates right now')
             self.wake_up()
@@ -637,6 +637,7 @@ class Scheduler():
     def _rerun_failed_job(self, job):
         # Rerun failed job.
         now = dt.datetime.now()
+        delay = config['SCHEDULER']['rerun_delay']
         interval = config['SCHEDULER'].get('rerun')
         try:
             id = job.job_id
@@ -646,16 +647,16 @@ class Scheduler():
             start_date = to_timestamp(job.start_date)
             end_date = to_timestamp(job.end_date)
             added = to_datetime(job.added)
-            maxreruns = coalesce(job.maxreruns, 0)
-            maxdays = coalesce(job.maxdays, 0)
+            rerun_limit = coalesce(job.rerun_limit, 0)
+            rerun_days = coalesce(job.rerun_days, 0)
             rerun_times = coalesce(job.rerun_times, 0)
-            date_from = now-dt.timedelta(days=maxdays)
+            date_from = now-dt.timedelta(days=rerun_days)
             date_to = now-dt.timedelta(seconds=interval)
             if (
                 status is True
                 and (start_date is None or start_date < self.moment)
                 and (end_date is None or end_date > self.moment)
-                and rerun_times < maxreruns
+                and rerun_times < rerun_limit
                 and added > date_from
                 and added < date_to
             ):
@@ -702,7 +703,7 @@ class Scheduler():
         number = len(self.daemons)
         logger.debug(f'{number} daemons made {self.daemons}')
 
-        number = config['SCHEDULER'].get('chargers')
+        number = config['SCHEDULER']['chargers_number']
         target = self._charger
         for i in range(number):
             name = f'Charger-{i}'
@@ -711,7 +712,7 @@ class Scheduler():
             self.chargers.append(thread)
         logger.debug(f'{number} chargers made {self.chargers}')
 
-        number = config['SCHEDULER'].get('executors')
+        number = config['SCHEDULER']['executors_number']
         target = self._executor
         for i in range(number):
             name = f'Executor-{i}'
@@ -747,7 +748,7 @@ class Job():
     """Represents single application job."""
 
     def __init__(self, id=None, name=None, desc=None, tag=None, date=None,
-                 record_id=None, trigger_id=None, recipients=None,
+                 record_id=None, trigger_id=None, email_list=None,
                  alarm=None, debug=None, solo=None):
         self.conn = db.connect()
         self.path = locate()
@@ -805,8 +806,8 @@ class Job():
         self.initiator = db.record(history, self.initiator_id)
 
         # Configure dependent objects.
-        recipients = coalesce(recipients, schedule['recipients'])
-        self.recipients = self._parse_recipients(recipients)
+        email_list = coalesce(email_list, schedule['email_list'])
+        self.email_list = self._parse_email_list(email_list)
 
         self.auto = args.auto
         self.solo = args.solo
@@ -814,7 +815,7 @@ class Job():
         self.debug = coalesce(args.debug, debug, schedule['debug'], False)
         logger.configure(app=self.name, desc=self.desc,
                          debug=self.debug, alarming=self.alarm,
-                         smtp={'recipients': self.recipients})
+                         smtp={'recipients': self.email_list})
 
         self.server = platform.node()
         self.user = os.getlogin()
@@ -1219,11 +1220,11 @@ class Job():
         table = db.tables.schedule
         record = db.record(table, self.id)
         result = record.read()
-        schedule = {'name': result.job,
-                    'desc': result.description,
+        schedule = {'name': result.job_name,
+                    'desc': result.job_description,
                     'debug': True if result.debug == 'Y' else False,
                     'alarm': True if result.alarm == 'Y' else False,
-                    'recipients': result.recipients}
+                    'email_list': result.email_list}
         return schedule
 
     def _parse_arguments(self):
@@ -1256,19 +1257,19 @@ class Job():
             return os.path.relpath(logger.file.path)
         pass
 
-    def _parse_recipients(self, recipients):
-        recipients = recipients or []
-        if isinstance(recipients, (str, list)) is True:
-            if isinstance(recipients, str) is True:
-                if ',' in recipients:
-                    recipients = recipients.replace(' ', '').split(',')
+    def _parse_email_list(self, email_list):
+        email_list = email_list or []
+        if isinstance(email_list, (str, list)) is True:
+            if isinstance(email_list, str) is True:
+                if ',' in email_list:
+                    email_list = email_list.replace(' ', '').split(',')
                 else:
-                    recipients = [recipients]
+                    email_list = [email_list]
         else:
-            recipients = []
+            email_list = []
         owners = logger.root.email.recipients or []
-        recipients = [*recipients, *owners]
-        return recipients
+        email_list = [*email_list, *owners]
+        return email_list
 
     def _set_signals(self):
         # Configure signal triggers.

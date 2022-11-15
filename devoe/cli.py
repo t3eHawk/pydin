@@ -261,15 +261,22 @@ class Manager():
         """Show all scheduled jobs."""
         id = self._check_id(id) if id is not None else id
         jobs = list(self.driver.list_jobs(id=id))
-        row = '{id:<5}|{name:<30}|{desc:<30}|{status:<6}|'
-        head = row.format(id='ID', name='NAME', desc='DESC', status='STATUS')
-        border = 75*'-'
+        row = '|{id:<4}|{name:<30}|{desc:<35}|{status:<6}|'
+        head = row.format(id='ID',
+                          name='JOB_NAME',
+                          desc='JOB_DESCRIPTION',
+                          status='STATUS')
+        border = f'+{"":->78}+'
         print(border)
         print(head)
         for job in jobs:
             id = job['id']
-            name = job['job'] or ''
-            desc = job['description'] or ''
+            name = job['job_name'] or ''
+            if len(name) > 30:
+                name = f'{name[:27]}...'
+            desc = job['job_description'] or ''
+            if len(desc) > 35:
+                desc = f'{desc[:31]}...'
             status = job['status'] or ''
             print(border)
             print(row.format(id=id, name=name, desc=desc, status=status))
@@ -493,7 +500,7 @@ class Manager():
         min = input('Minute [0-59] ===== ') or None
         sec = input('Second [0-59] ===== ') or None
         tgid = input('Triggering JID [1...n] === ')
-        tgid = int(tgid) if tgid.isdigit() is True else None
+        tgid = int(tgid) if tgid.isdigit() else None
         tgid = db.null if tgid == 0 else tgid
         print()
         start_date = input('Start date [YYYY-MM-DD HH24:MI:SS] ') or None
@@ -502,20 +509,20 @@ class Manager():
         end_date = db.null if end_date == '-' else None
         print()
         timeout = input('Set timeout [1...n] ')
-        timeout = int(timeout) if timeout.isdigit() is True else None
+        timeout = int(timeout) if timeout.isdigit() else None
         timeout = db.null if timeout == 0 else timeout
-        maxreruns = input('Limit of reruns number [1...n] ')
-        maxreruns = int(maxreruns) if maxreruns.isdigit() is True else None
-        maxreruns = db.null if maxreruns == 0 else maxreruns
-        maxdays = input('Limit of days in maintenance [1...n] ')
-        maxdays = int(maxdays) if maxdays.isdigit() is True else None
-        maxdays = db.null if maxdays == 0 else maxdays
+        rerun_limit = input('Limit of reruns number [1...n] ')
+        rerun_limit = int(rerun_limit) if rerun_limit.isdigit() else None
+        rerun_limit = db.null if rerun_limit == 0 else rerun_limit
+        rerun_days = input('Limit of days in maintenance [1...n] ')
+        rerun_days = int(rerun_days) if rerun_days.isdigit() else None
+        rerun_days = db.null if rerun_days == 0 else rerun_days
         print()
         alarm = input('Enable alarming for this job [Y] ')
         alarm = True if alarm == 'Y' else None
-        recipients = input('List notification email addresses [a,b,...]: ')
+        email_list = input('List notification email addresses [a,b,...]: ')
         pattern = r'([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)'
-        recipients = ','.join(re.findall(pattern, recipients)) or None
+        email_list = ','.join(re.findall(pattern, email_list)) or None
         result = {'name': name,
                   'desc': desc,
                   'env': env,
@@ -528,10 +535,10 @@ class Manager():
                   'start_date': start_date,
                   'end_date': end_date,
                   'timeout': timeout,
-                  'maxreruns': maxreruns,
-                  'maxdays': maxdays,
+                  'rerun_limit': rerun_limit,
+                  'rerun_days': rerun_days,
                   'alarm': alarm,
-                  'recipients': recipients}
+                  'email_list': email_list}
         print()
         return result
 
