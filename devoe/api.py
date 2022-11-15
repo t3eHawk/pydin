@@ -60,6 +60,7 @@ class Driver():
                                      'chargers_number': '5',
                                      'executors_number': '20',
                                      'refresh_interval': '300',
+                                     'rerun_delay': '14400',
                                      'rerun_interval': '3600',
                                      'wakeup_interval': '60'
                                      },

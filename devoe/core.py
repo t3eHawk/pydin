@@ -638,7 +638,7 @@ class Scheduler():
         # Rerun failed job.
         now = dt.datetime.now()
         delay = config['SCHEDULER']['rerun_delay']
-        interval = config['SCHEDULER'].get('rerun')
+        interval = config['SCHEDULER']['rerun_interval']
         try:
             id = job.job_id
             tag = job.run_tag
@@ -651,7 +651,7 @@ class Scheduler():
             rerun_days = coalesce(job.rerun_days, 0)
             rerun_times = coalesce(job.rerun_times, 0)
             date_from = now-dt.timedelta(days=rerun_days)
-            date_to = now-dt.timedelta(seconds=interval)
+            date_to = now-dt.timedelta(seconds=delay+interval)
             if (
                 status is True
                 and (start_date is None or start_date < self.moment)
