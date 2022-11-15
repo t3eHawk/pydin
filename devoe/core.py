@@ -59,13 +59,14 @@ class Scheduler():
         self.entry_queue = queue.Queue()
         self.waiting_lists = {}
 
+        self.reading = th.Event()
         self.resurrection = th.Event()
         self.waking_up = th.Event()
 
         self.procs = {}
+        self.daemons = []
         self.chargers = []
         self.executors = []
-        self.maintainers = []
 
         self.server = platform.node()
         self.user = os.getlogin()
@@ -131,6 +132,11 @@ class Scheduler():
         self.start()
         pass
 
+    def read(self):
+        """Initiate the schedule reading."""
+        if not self.reading.is_set():
+            return self.reading.set()
+
     def rerun(self):
         """Initiate launch procedure of failed jobs."""
         if not self.resurrection.is_set():
@@ -153,6 +159,24 @@ class Scheduler():
         )
         select = select.where(table.c.job_id == id)
         result = conn.execute(select).scalar()
+        return result
+
+    def list_failed_jobs(self):
+        """Get the list of the failed jobs."""
+        h = db.tables.run_history
+        s = db.tables.schedule
+        select = (sa.select([h.c.id, h.c.job_id, h.c.run_tag,
+                             h.c.added, h.c.rerun_times,
+                             s.c.status, s.c.start_date, s.c.end_date,
+                             s.c.environment, s.c.arguments,
+                             s.c.timeout, s.c.maxreruns, s.c.maxdays]).
+                  select_from(sa.join(h, s, h.c.job_id == s.c.id)).
+                  where(sa.and_(h.c.status.in_(['E', 'T']),
+                                h.c.rerun_id.is_(None),
+                                h.c.rerun_now.is_(None),
+                                h.c.rerun_done.is_(None))))
+        conn = db.connect()
+        result = conn.execute(select).fetchall()
         return result
 
     def _start(self):
@@ -264,7 +288,7 @@ class Scheduler():
         interval = config['SCHEDULER'].get('reschedule')
         if int(self.moment) % interval == 0:
             logger.debug('Schedule will be refreshed now')
-            self._read()
+            self.read()
             logger.info('Schedule refreshed')
         # Rerun failed jobs.
         interval = config['SCHEDULER'].get('rerun')
@@ -346,61 +370,22 @@ class Scheduler():
                 logger.error()
         pass
 
+    def _reader(self):
+        # Read and update in-memory schedule if necessary.
+        while True:
+            if self.reading.is_set():
+                self._read()
+            tm.sleep(1)
+
     def _rerun(self):
         # Define failed runs and send them on re-execution.
         while True:
             if self.resurrection.is_set():
                 logger.debug('Rerun procedure starts...')
                 try:
-                    h = db.tables.run_history
-                    s = db.tables.schedule
-                    select = (sa.select([h.c.id, h.c.job_id, h.c.run_tag,
-                                         h.c.added, h.c.rerun_times,
-                                         s.c.status, s.c.start_date, s.c.end_date,
-                                         s.c.environment, s.c.arguments,
-                                         s.c.timeout, s.c.maxreruns, s.c.maxdays]).
-                              select_from(sa.join(h, s, h.c.job_id == s.c.id)).
-                              where(sa.and_(h.c.status.in_(['E', 'T']),
-                                            h.c.rerun_id.is_(None),
-                                            h.c.rerun_now.is_(None),
-                                            h.c.rerun_done.is_(None))))
-                    conn = db.connect()
-                    now = dt.datetime.now()
-                    interval = config['SCHEDULER'].get('rerun')
-                    date_to = now-dt.timedelta(seconds=interval)
-                    result = conn.execute(select).fetchall()
-                    for row in result:
-                        try:
-                            id = row.job_id
-                            tag = row.run_tag
-                            repr = f'Job[{id}:{tag}]'
-                            status = True if row.status == 'Y' else False
-                            start_date = to_timestamp(row.start_date)
-                            end_date = to_timestamp(row.end_date)
-                            added = to_datetime(row.added)
-                            maxreruns = coalesce(row.maxreruns, 0)
-                            maxdays = coalesce(row.maxdays, 0)
-                            rerun_times = coalesce(row.rerun_times, 0)
-                            date_from = now-dt.timedelta(days=maxdays)
-                            if (
-                                status is True
-                                and (start_date is None or start_date < self.tag)
-                                and (end_date is None or end_date > self.tag)
-                                and rerun_times < maxreruns
-                                and added > date_from
-                                and added < date_to
-                            ):
-                                job = {'id': id,
-                                       'env': row.environment,
-                                       'args': row.arguments,
-                                       'timeout': row.timeout,
-                                       'record_id': row.id}
-                                logger.debug(f'Job will be sent for rerun {job}')
-                                logger.info(f'Adding {repr} to the queue for rerun...')
-                                self.queue.put((job, tag))
-                                logger.info(f'{repr} added to the queue for rerun')
-                        except Exception:
-                            logger.error()
+                    failed_jobs = self.list_failed_jobs()
+                    for job in failed_jobs:
+                        self._rerun_failed_job(job)
                 except Exception:
                     logger.error()
                 else:
@@ -419,29 +404,7 @@ class Scheduler():
                         job, tag = queue[0]
                         repr = f'Job[{job.id}:{tag}]'
                         logger.debug(f'Thread used by {repr}')
-                        ready_to_go = True
-
-                        if ready_to_go and job.sleep_period:
-                            time_unit = tm.localtime(self.moment).tm_hour
-                            if self._check(job.sleep_period, time_unit):
-                                logger.debug(f'{repr} still waits due to sleep window')
-                                ready_to_go = False
-
-                        if ready_to_go and job.parallelism:
-                            parallelism = job.parallelism
-                            parallelism = 999 if parallelism == 'Y' else parallelism
-                            parallelism = 1 if parallelism == 'N' else parallelism
-                            if isinstance(parallelism, str):
-                                if parallelism.isdigit():
-                                    parallelism = int(parallelism)
-                                else:
-                                    parallelism = 1
-                            if isinstance(parallelism, int):
-                                if self.count_running(job.id) > parallelism:
-                                    logger.debug(f'{repr} still waits due to parallelism')
-                                    ready_to_go = False
-
-                        if ready_to_go:
+                        if self._check_sleeping_job(job, tag):
                             logger.debug(f'{repr} is ready to execute')
                             self._charge(job, tag)
                             queue.pop(0)
@@ -483,32 +446,7 @@ class Scheduler():
                 job, tag = self.entry_queue.get()
                 repr = f'Job[{job.id}:{tag}]'
                 logger.debug(f'Thread used by {repr}')
-                ready_to_go = True
-
-                if ready_to_go and job.sleep_period:
-                    time_unit = tm.localtime(tag).tm_hour
-                    if self._check(job.sleep_period, time_unit):
-                        logger.debug(f'{repr} waits due to sleep window')
-                        ready_to_go = False
-                    elif self.waiting_lists.get(job.id):
-                        logger.debug(f'{repr} waits due to waiting runs')
-                        ready_to_go = False
-
-                if ready_to_go and job.parallelism:
-                    parallelism = job.parallelism
-                    parallelism = 999 if parallelism == 'Y' else parallelism
-                    parallelism = 1 if parallelism == 'N' else parallelism
-                    if isinstance(parallelism, str):
-                        if parallelism.isdigit():
-                            parallelism = int(parallelism)
-                        else:
-                            parallelism = 1
-                    if isinstance(parallelism, int):
-                        if self.count_running(job.id) > parallelism:
-                            logger.debug(f'{repr} waits due to parallelism')
-                            ready_to_go = False
-
-                if ready_to_go:
+                if self._check_regular_job(job, tag):
                     logger.debug(f'{repr} is ready to execute')
                     self._charge(job, tag)
                 else:
@@ -621,6 +559,100 @@ class Scheduler():
                 logger.info(f'{repr} completed')
         pass
 
+    def _check_regular_job(self, job, tag):
+        # Check if regular job is ready for execution.
+        repr = f'Job[{job.id}:{tag}]'
+        ready_to_go = True
+
+        if ready_to_go and job.sleep_period:
+            time_unit = tm.localtime(tag).tm_hour
+            if self._check(job.sleep_period, time_unit):
+                logger.debug(f'{repr} waits due to sleep window')
+                ready_to_go = False
+            elif self.waiting_lists.get(job.id):
+                logger.debug(f'{repr} waits due to waiting runs')
+                ready_to_go = False
+
+        if ready_to_go and job.parallelism:
+            parallelism = job.parallelism
+            parallelism = 999 if parallelism == 'Y' else parallelism
+            parallelism = 1 if parallelism == 'N' else parallelism
+            if isinstance(parallelism, str):
+                if parallelism.isdigit():
+                    parallelism = int(parallelism)
+                else:
+                    parallelism = 1
+            if isinstance(parallelism, int):
+                if self.count_running(job.id) > parallelism:
+                    logger.debug(f'{repr} waits due to parallelism')
+                    ready_to_go = False
+
+        return ready_to_go
+
+    def _check_sleeping_job(self, job, tag):
+        # Check if sleeping job is ready for execution.
+        repr = f'Job[{job.id}:{tag}]'
+        ready_to_go = True
+
+        if ready_to_go and job.sleep_period:
+            time_unit = tm.localtime(self.moment).tm_hour
+            if self._check(job.sleep_period, time_unit):
+                logger.debug(f'{repr} still waits due to sleep window')
+                ready_to_go = False
+
+        if ready_to_go and job.parallelism:
+            parallelism = job.parallelism
+            parallelism = 999 if parallelism == 'Y' else parallelism
+            parallelism = 1 if parallelism == 'N' else parallelism
+            if isinstance(parallelism, str):
+                if parallelism.isdigit():
+                    parallelism = int(parallelism)
+                else:
+                    parallelism = 1
+            if isinstance(parallelism, int):
+                if self.count_running(job.id) > parallelism:
+                    logger.debug(f'{repr} still waits due to parallelism')
+                    ready_to_go = False
+
+        return ready_to_go
+
+    def _rerun_failed_job(self, job):
+        # Rerun failed job.
+        now = dt.datetime.now()
+        interval = config['SCHEDULER'].get('rerun')
+        try:
+            id = job.job_id
+            tag = job.run_tag
+            repr = f'Job[{id}:{tag}]'
+            status = True if job.status == 'Y' else False
+            start_date = to_timestamp(job.start_date)
+            end_date = to_timestamp(job.end_date)
+            added = to_datetime(job.added)
+            maxreruns = coalesce(job.maxreruns, 0)
+            maxdays = coalesce(job.maxdays, 0)
+            rerun_times = coalesce(job.rerun_times, 0)
+            date_from = now-dt.timedelta(days=maxdays)
+            date_to = now-dt.timedelta(seconds=interval)
+            if (
+                status is True
+                and (start_date is None or start_date < self.moment)
+                and (end_date is None or end_date > self.moment)
+                and rerun_times < maxreruns
+                and added > date_from
+                and added < date_to
+            ):
+                job = {'id': id,
+                       'env': job.environment,
+                       'args': job.arguments,
+                       'timeout': job.timeout,
+                       'record_id': job.id}
+                logger.debug(f'Job will be sent for rerun {job}')
+                logger.info(f'Adding {repr} to the queue for rerun...')
+                self.queue.put((job, tag))
+                logger.info(f'{repr} added to the queue for rerun')
+        except Exception:
+            logger.error()
+
     def _parse_arguments(self):
         parser = argparse.ArgumentParser()
         parser.add_argument('--start', action='store_true',
@@ -643,6 +675,15 @@ class Scheduler():
         # Configure all necessary threads.
         logger.debug('Making threads for this scheduler...')
 
+        targets = [self._read, self._rerun, self._wake_up]
+        for i, target in enumerate(targets):
+            name = f'Daemon-{i}'
+            thread = th.Thread(name=name, target=target, daemon=True)
+            thread.start()
+            self.daemons.append(thread)
+        number = len(self.daemons)
+        logger.debug(f'{number} daemons made {self.daemons}')
+
         number = config['SCHEDULER'].get('chargers')
         target = self._charger
         for i in range(number):
@@ -660,15 +701,6 @@ class Scheduler():
             thread.start()
             self.executors.append(thread)
         logger.debug(f'{number} executors made {self.executors}')
-
-        targets = [self._rerun, self._wake_up]
-        for i, target in enumerate(targets):
-            name = f'Maintainer-{i}'
-            thread = th.Thread(name=name, target=target, daemon=True)
-            thread.start()
-            self.maintainers.append(thread)
-        number = len(self.maintainers)
-        logger.debug(f'{number} maintainer threads made {self.maintainers}')
 
         pass
 
