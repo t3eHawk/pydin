@@ -31,7 +31,9 @@ from .logger import logger
 
 from .utils import locate
 from .utils import cache, declare
-from .utils import coalesce
+from .utils import case, coalesce
+from .utils import first, last
+from .utils import to_boolean
 from .utils import to_datetime, to_timestamp
 from .utils import to_process, to_python
 
@@ -57,6 +59,7 @@ class Scheduler():
 
         self.queue = queue.Queue()
         self.entry_queue = queue.Queue()
+        self.running_lists = {}
         self.waiting_lists = {}
 
         self.reading = th.Event()
@@ -100,6 +103,295 @@ class Scheduler():
         """Represent this scheduler with its name."""
         return self.name
 
+    class Job:
+        """Represents scheduler job."""
+
+        def __init__(self, id, scheduler, name=None, desc=None, status=None,
+                     mday=None, wday=None, hour=None, min=None, sec=None,
+                     trigger_id=None, start_timestamp=None, end_timestamp=None,
+                     env=None, args=None, timeout=None, parallelism=None,
+                     rerun_times=None, rerun_limit=None, rerun_days=None,
+                     sleep_period=None, tag=None, record_id=None, added=None):
+            self.id, self.scheduler = id, scheduler
+            self.setup(name=name, desc=desc, status=status,
+                       hour=hour, min=min, sec=sec,
+                       mday=mday, wday=wday, trigger_id=trigger_id,
+                       start_timestamp=start_timestamp,
+                       end_timestamp=end_timestamp,
+                       env=env, args=args,
+                       timeout=timeout, parallelism=parallelism,
+                       rerun_times=rerun_times, rerun_limit=rerun_limit,
+                       rerun_days=rerun_days,
+                       sleep_period=sleep_period,
+                       tag=tag, record_id=record_id, added=added)
+            pass
+
+        def __repr__(self):
+            if self.is_run:
+                return f'Job[{self.id}:{self.tag}]'
+            else:
+                return f'Job[{self.id}]'
+
+        @property
+        def is_schedule(self):
+            """Determine if this job is a schedule entity."""
+            if self.tag and self.record_id:
+                return False
+            else:
+                return True
+
+        @property
+        def is_run(self):
+            """Determine if this job is a run entity."""
+            return not self.is_schedule
+
+        @property
+        def config(self):
+            """Get configuration fields."""
+            return types.SimpleNamespace(
+                name=self.name,
+                desc=self.desc,
+                status=self.status,
+                mday=self.mday,
+                wday=self.wday,
+                hour=self.hour,
+                min=self.min,
+                sec=self.sec,
+                trigger_id=self.trigger_id,
+                start_timestamp=self.start_timestamp,
+                end_timestamp=self.end_timestamp,
+                env=self.env,
+                args=self.args,
+                timeout=self.timeout,
+                parallelism=self.parallelism,
+                rerun_limit=self.rerun_limit,
+                rerun_days=self.rerun_days,
+                sleep_period=self.sleep_period
+            )
+
+        def setup(self, name=None, desc=None, status=None,
+                  mday=None, wday=None, hour=None, min=None, sec=None,
+                  trigger_id=None, start_timestamp=None, end_timestamp=None,
+                  env=None, args=None, timeout=None, parallelism=None,
+                  rerun_times=None, rerun_limit=None, rerun_days=None,
+                  sleep_period=None, tag=None, record_id=None, added=None):
+            """Configure this job."""
+            self.name = name
+            self.desc = desc
+            self.status = to_boolean(status)
+            self.mday = mday
+            self.wday = wday
+            self.hour = hour
+            self.min = min
+            self.sec = sec
+            self.trigger_id = trigger_id
+            self.start_timestamp = to_timestamp(start_timestamp)
+            self.end_timestamp = to_timestamp(end_timestamp)
+            self.env = env
+            self.args = args
+            self.timeout = timeout
+            self.parallelism = parallelism
+            self.sleep_period = sleep_period
+
+            self.tag = tag
+            self.record_id = record_id
+            self.added = to_timestamp(added)
+
+            self.rerun_times = coalesce(rerun_times, 0)
+            self.rerun_limit = coalesce(rerun_limit, 0)
+            self.rerun_days = coalesce(rerun_days, 0)
+
+        def check_in(self):
+            """Put this job into scheduler running list."""
+            if not self.scheduler.running_lists.get(self.id):
+                self.scheduler.running_lists[self.id] = {}
+            running_list = self.scheduler.running_lists[self.id]
+            running_list[self.record_id] = [self, self.tag]
+
+        def check_out(self):
+            """Pop this job from the scheduler running list."""
+            if self.scheduler.running_lists[self.id]:
+                running_list = self.scheduler.running_lists[self.id]
+                running_list.pop(self.record_id)
+
+        def sleep(self):
+            """Put this this job to sleep."""
+            if not self.scheduler.waiting_lists.get(self.id):
+                self.scheduler.waiting_lists[self.id] = {}
+            waiting_list = self.scheduler.waiting_lists[self.id]
+            waiting_list[self.record_id] = [self, self.tag]
+
+        def from_schedule(self, record):
+            """Configure this simple job using schedule record."""
+            self.setup(name=record.job_name,
+                       desc=record.job_description,
+                       status=record.status,
+                       hour=record.hour,
+                       min=record.minute,
+                       sec=record.second,
+                       mday=record.monthday,
+                       wday=record.weekday,
+                       trigger_id=record.trigger_id,
+                       start_timestamp=record.start_date,
+                       end_timestamp=record.end_date,
+                       env=record.environment,
+                       args=record.arguments,
+                       timeout=record.timeout,
+                       parallelism=record.parallelism,
+                       rerun_limit=record.rerun_limit,
+                       rerun_days=record.rerun_days,
+                       sleep_period=record.sleep_period)
+            return self
+
+        def from_run(self, record):
+            """Configure this simple job using run record."""
+            self.setup(tag=record.run_tag,
+                       record_id=record.id,
+                       name=record.job_name,
+                       desc=record.job_description,
+                       status=record.status,
+                       mday=record.monthday,
+                       wday=record.weekday,
+                       hour=record.hour,
+                       min=record.minute,
+                       sec=record.second,
+                       trigger_id=record.trigger_id,
+                       start_timestamp=record.start_date,
+                       end_timestamp=record.end_date,
+                       env=record.environment,
+                       args=record.arguments,
+                       timeout=record.timeout,
+                       parallelism=record.parallelism,
+                       sleep_period=record.sleep_period,
+                       added=record.added,
+                       rerun_times=record.rerun_times,
+                       rerun_limit=record.rerun_limit,
+                       rerun_days=record.rerun_days)
+            return self
+
+        def to_run(self, tag, record_id):
+            """Convert this simple job into run."""
+            parameters = self.config.__dict__
+            return self.__class__(self.id, self.scheduler, **parameters,
+                                  tag=tag, record_id=record_id)
+
+        def refresh(self):
+            """Refresh configuration fields."""
+            record = self.scheduler.get_job(self.id)
+            for key in self.config.__dict__.keys():
+                setattr(self, key, record.__dict__[key])
+
+        def is_active(self):
+            """Check if this job is active for the current timestamp."""
+            return self.was_active(self.scheduler.moment)
+
+        def was_active(self, timestamp):
+            """Check if this job was active for a given timestamp."""
+            if (
+                self.status is True
+                and coalesce(self.start_timestamp, timestamp-1) < timestamp
+                and coalesce(self.end_timestamp, timestamp+1) > timestamp
+                and self.trigger_id is None
+            ):
+                return True
+            else:
+                return False
+
+        def is_scheduled(self):
+            """Check if this job is scheduled at the current timestamp."""
+            return self.was_scheduled(self.scheduler.moment)
+
+        def was_scheduled(self, timestamp):
+            """Check if this job was scheduled at a given timestamp."""
+            time = self.scheduler.parser(timestamp)
+            if (
+                self.scheduler.matcher(self.mday, time.mday)
+                and self.scheduler.matcher(self.wday, time.wday)
+                and self.scheduler.matcher(self.hour, time.hour)
+                and self.scheduler.matcher(self.min, time.min)
+                and self.scheduler.matcher(self.sec, time.sec)
+            ):
+                return True
+            else:
+                return False
+
+        def is_sleeping(self):
+            """Check if the sleep window is currently active."""
+            return self.was_sleeping(self.scheduler.moment)
+
+        def was_sleeping(self, timestamp):
+            """Check if the sleep window was active at a timestamp."""
+            time_unit = self.scheduler.parser(timestamp)
+            if self.scheduler.matcher(self.sleep_period, time_unit):
+                return True
+            else:
+                return False
+
+        def is_waiting(self):
+            """Check if this job has to wait."""
+            if self.scheduler.waiting_lists.get(self.id):
+                return True
+            else:
+                return False
+
+        def is_busy(self):
+            """Check if the given scheduler is free to run this job."""
+            if self.parallelism:
+                parameter = self.parallelism
+                limit = case(parameter, 'Y', 999, 'N', 1, parameter)
+                if isinstance(limit, str):
+                    if limit.isdigit():
+                        limit = int(limit)
+                    else:
+                        limit = 1
+                if isinstance(limit, int):
+                    if self.scheduler.count_running(self.id) > limit:
+                        return True
+                    else:
+                        return False
+            else:
+                return False
+
+        def is_ready(self):
+            """Check if this job is ready for run or rerun."""
+            if (
+                not self.is_sleeping()
+                and not self.is_waiting()
+                and not self.is_busy()
+            ):
+                return True
+            else:
+                return False
+
+        def is_awaken(self):
+            """Check if this job is ready to awake."""
+            if (
+                not self.is_sleeping()
+                and not self.scheduler.count_running(self.id)
+                and not self.is_busy()
+            ):
+                return True
+            else:
+                return False
+
+        def is_rerun_available(self):
+            """Check whether rerun is available for this job or not."""
+            now = dt.datetime.now()
+            delay = config['SCHEDULER']['rerun_delay']
+            interval = config['SCHEDULER']['rerun_interval']
+            date_from = now-dt.timedelta(days=self.rerun_days)
+            date_to = now-dt.timedelta(seconds=delay+interval)
+            if (
+                self.rerun_times < self.rerun_limit
+                and to_datetime(self.added) > date_from
+                and to_datetime(self.added) < date_to
+            ):
+                return True
+            else:
+                return False
+
+        pass
+
     @property
     def running(self):
         """Check whether scheduler running or not."""
@@ -109,6 +401,16 @@ class Scheduler():
         result = conn.execute(select).first()
         status = True if result.status == 'Y' else False
         return status
+
+    @property
+    def current_timestamp(self):
+        """Get current scheduler timestamp."""
+        return int(self.moment) if self.moment else 0
+
+    @property
+    def current_datetime(self):
+        """Get current scheduler datetime."""
+        return dt.datetime.fromtimestamp(self.current_timestamp)
 
     def start(self):
         """Launch the scheduler."""
@@ -149,6 +451,12 @@ class Scheduler():
 
     def count_running(self, id):
         """Get the number of currently running jobs."""
+        if self.running_lists.get(id):
+            return len(self.running_lists[id])
+        else:
+            return 0
+
+    def _count_running(self, id):
         conn = db.connect()
         table = db.tables.run_history
         select = sa.select(sa.func.count()).select_from(table).where(
@@ -178,15 +486,32 @@ class Scheduler():
         result = sum((len(jobs) for jobs in self.waiting_lists.values()))
         return result
 
+    def get_job(self, id):
+        if self.schedule:
+            return [record for record in self.schedule if record.id == id][0]
+
+    def list_jobs(self):
+        """Get the list of all scheduled jobs."""
+        conn = db.connect()
+        table = db.tables.schedule
+        select = table.select()
+        result = conn.execute(select).fetchall()
+        for record in result:
+            job = self.Job(record.id, self).from_schedule(record)
+            yield job
+
     def list_failed_jobs(self):
         """Get the list of the failed jobs."""
         h = db.tables.run_history
         s = db.tables.schedule
-        select = (sa.select([h.c.id, h.c.job_id, h.c.run_tag,
-                             h.c.added, h.c.rerun_times,
-                             s.c.rerun_limit, s.c.rerun_days,
-                             s.c.status, s.c.start_date, s.c.end_date,
-                             s.c.environment, s.c.arguments, s.c.timeout]).
+        select = (sa.select([h.c.id, h.c.job_id, h.c.run_tag, h.c.added,
+                             s.c.job_name, s.c.job_description, s.c.status,
+                             s.c.hour, s.c.minute, s.c.second,
+                             s.c.monthday, s.c.weekday,
+                             s.c.trigger_id, s.c.start_date, s.c.end_date,
+                             s.c.environment, s.c.arguments,
+                             s.c.timeout, s.c.parallelism, s.c.sleep_period,
+                             h.c.rerun_times, s.c.rerun_limit, s.c.rerun_days]).
                   select_from(sa.join(h, s, h.c.job_id == s.c.id)).
                   where(sa.and_(h.c.status.in_(['E', 'T']),
                                 h.c.rerun_id.is_(None),
@@ -194,7 +519,71 @@ class Scheduler():
                                 h.c.rerun_done.is_(None))))
         conn = db.connect()
         result = conn.execute(select).fetchall()
-        return result
+        for record in result:
+            job = self.Job(record.job_id, self).from_run(record)
+            tag = record.run_tag
+            yield job, tag
+
+    def list_sleeping_jobs(self):
+        """Get the list of the sleeping jobs."""
+        h = db.tables.run_history
+        s = db.tables.schedule
+        select = (sa.select([h.c.id, h.c.job_id, h.c.run_tag, h.c.added,
+                             s.c.job_name, s.c.job_description, s.c.status,
+                             s.c.hour, s.c.minute, s.c.second,
+                             s.c.monthday, s.c.weekday,
+                             s.c.trigger_id, s.c.start_date, s.c.end_date,
+                             s.c.environment, s.c.arguments,
+                             s.c.timeout, s.c.parallelism, s.c.sleep_period,
+                             h.c.rerun_times, s.c.rerun_limit, s.c.rerun_days]).
+                  select_from(sa.join(h, s, h.c.job_id == s.c.id)).
+                  where(h.c.status == 'W'))
+        conn = db.connect()
+        result = conn.execute(select).fetchall()
+        for record in result:
+            job = self.Job(record.job_id, self).from_run(record)
+            tag = record.run_tag
+            yield job, tag
+
+    def parser(self, timestamp):
+        """Parse the given timestamp into the desired structure."""
+        structure = tm.localtime(timestamp)
+        namespace = types.SimpleNamespace(
+            timestamp=timestamp,
+            mday=structure.tm_mday,
+            wday=structure.tm_wday+1,
+            hour=structure.tm_hour,
+            min=structure.tm_min,
+            sec=structure.tm_sec
+        )
+        return namespace
+
+    def matcher(self, period, unit):
+        """Match the given period parameter and time unit."""
+        # Check if empty or *.
+        if period is None or re.match(r'^(\*)$', period) is not None:
+            return True
+        # Check if period is lonely digit and equals to unit.
+        elif re.match(r'^\d+$', period) is not None:
+            period = int(period)
+            return True if unit == period else False
+        # Check if period is a cycle and integer division with unit is true.
+        elif re.match(r'^/\d+$', period) is not None:
+            period = int(re.search(r'\d+', period).group())
+            if period == 0:
+                return False
+            return True if unit % period == 0 else False
+        # Check if period is a range and unit is in this range.
+        elif re.match(r'^\d+-\d+$', period) is not None:
+            period = [int(i) for i in re.findall(r'\d+', period)]
+            return True if unit in range(period[0], period[1]+1) else False
+        # Check if period is a list and unit is in this list.
+        elif re.match(r'^\d+,\s*\d+.*$', period):
+            period = [int(i) for i in re.findall(r'\d+', period)]
+            return True if unit in period else False
+        # All other cases is not for the unit.
+        else:
+            return False
 
     def _start(self):
         # Perform all necessary preparations before scheduler start.
@@ -205,7 +594,9 @@ class Scheduler():
         self._set_signals()
         self._make_threads()
         self._update_component()
-        self._read()
+        self._read_schedule()
+        self._read_failed_jobs()
+        self._read_sleeping_jobs()
         self._synchronize()
         logger.info(f'Scheduler started on PID[{self.pid}]')
         pass
@@ -319,65 +710,50 @@ class Scheduler():
         pass
 
     def _read(self):
-        # Parse the schedule from the table to the memory.
+        return self._read_schedule()
+
+    def _read_schedule(self):
+        # Parse the schedule from the table into memory.
         logger.debug('Refreshing schedule...')
         self.schedule = list(self._sked())
         if self.schedule:
             logger.debug(f'Schedule refreshed {self.schedule}')
         else:
             logger.debug('Schedule is empty')
+
+    def _read_failed_jobs(self):
+        # Parse the list of failed jobs from the history into memory.
+        logger.debug('Preparing a list of failed jobs')
+        logger.debug('List of failed jobs prepared')
+        pass
+
+    def _read_sleeping_jobs(self):
+        # Parse the list of sleeping jobs from the history into memory.
+        logger.debug('Preparing a list of sleeping jobs')
+        sleeping_jobs = self.list_sleeping_jobs()
+        for job, tag in sleeping_jobs:
+            if tag:
+                job.sleep()
+        logger.debug(f'List of sleeping jobs prepared')
         pass
 
     def _sked(self):
         # Read and parse the schedule from the database table.
         logger.debug('Getting schedule...')
-        conn = db.connect()
-        table = db.tables.schedule
-        select = table.select()
-        result = conn.execute(select).fetchall()
-        for row in result:
+        for job in self.list_jobs():
             try:
-                job = types.SimpleNamespace(
-                   id=row.id,
-                   status=True if row.status == 'Y' else False,
-                   mday=row.monthday,
-                   wday=row.weekday,
-                   hour=row.hour,
-                   min=row.minute,
-                   sec=row.second,
-                   tgid=row.trigger_id,
-                   start=to_timestamp(row.start_date),
-                   end=to_timestamp(row.end_date),
-                   env=row.environment,
-                   args=row.arguments,
-                   timeout=row.timeout,
-                   parallelism=row.parallelism,
-                   sleep_period=row.sleep_period
-                )
+                yield job
             except Exception:
                 logger.warning()
                 continue
-            else:
-                yield job
         logger.debug('Schedule retrieved')
         pass
 
     def _walk(self):
         # Walk through the jobs and find out which must be executed.
-        now = tm.localtime(self.moment)
         for job in self.schedule:
             try:
-                if (
-                    job.status is True
-                    and job.tgid is None
-                    and self._check(job.mday, now.tm_mday)
-                    and self._check(job.wday, now.tm_wday+1)
-                    and self._check(job.hour, now.tm_hour)
-                    and self._check(job.min, now.tm_min)
-                    and self._check(job.sec, now.tm_sec)
-                    and (job.start is None or job.start < self.moment)
-                    and (job.end is None or job.end > self.moment)
-                ):
+                if job.is_active() and job.is_scheduled():
                     self.entry_queue.put((job, self.moment))
             except Exception:
                 logger.error()
@@ -402,8 +778,8 @@ class Scheduler():
                 logger.debug('Rerun procedure starts...')
                 try:
                     failed_jobs = self.list_failed_jobs()
-                    for job in failed_jobs:
-                        self._rerun_failed_job(job)
+                    for job, tag in failed_jobs:
+                        self._regain_failed_job(job, tag)
                 except Exception:
                     logger.error()
                 else:
@@ -419,69 +795,40 @@ class Scheduler():
                 logger.debug('Wake Up procedure starts...')
                 for queue in self.waiting_lists.values():
                     if queue:
-                        job, tag = queue[0]
-                        repr = f'Job[{job.id}:{tag}]'
-                        logger.debug(f'Thread used by {repr}')
-                        if self._check_sleeping_job(job, tag):
-                            logger.debug(f'{repr} is ready to execute')
-                            self._charge(job, tag)
-                            queue.pop(0)
+                        job, tag = first(queue)
+                        self._regain_sleeping_job(job, tag)
                 logger.debug('Wake Up procedure completed')
                 self.waking_up.clear()
             tm.sleep(1)
-
-    def _check(self, period, unit):
-        # Check if the given period matches the time unit.
-        # Check if empty or *.
-        if period is None or re.match(r'^(\*)$', period) is not None:
-            return True
-        # Check if period is lonely digit and equals to unit.
-        elif re.match(r'^\d+$', period) is not None:
-            period = int(period)
-            return True if unit == period else False
-        # Check if period is a cycle and integer division with unit is true.
-        elif re.match(r'^/\d+$', period) is not None:
-            period = int(re.search(r'\d+', period).group())
-            if period == 0:
-                return False
-            return True if unit % period == 0 else False
-        # Check if period is a range and unit is in this range.
-        elif re.match(r'^\d+-\d+$', period) is not None:
-            period = [int(i) for i in re.findall(r'\d+', period)]
-            return True if unit in range(period[0], period[1]+1) else False
-        # Check if period is a list and unit is in this list.
-        elif re.match(r'^\d+,\s*\d+.*$', period):
-            period = [int(i) for i in re.findall(r'\d+', period)]
-            return True if unit in period else False
-        # All other cases is not for the unit.
-        else:
-            return False
 
     def _charger(self):
         # Add jobs from the entry queue to the execution queue.
         while True:
             if not self.entry_queue.empty():
                 job, tag = self.entry_queue.get()
-                repr = f'Job[{job.id}:{tag}]'
-                logger.debug(f'Thread used by {repr}')
-                if self._check_regular_job(job, tag):
-                    logger.debug(f'{repr} is ready to execute')
-                    self._charge(job, tag)
-                else:
-                    logger.debug(f'{repr} postponed for execution')
+                logger.debug(f'Thread used by {job}')
+                if job.is_sleeping():
+                    logger.debug(f'{job} waits due to sleep window')
                     self._postpone(job, tag)
-                    # self.entry_queue.put((job, tag))
+                elif job.is_waiting():
+                    logger.debug(f'{job} waits due to waiting runs')
+                    self._postpone(job, tag)
+                elif job.is_busy():
+                    logger.debug(f'{job} waits due to parallelism')
+                    self._postpone(job, tag)
+                else:
+                    logger.debug(f'{job} is ready to execute')
+                    self._charge(job, tag)
                 self.entry_queue.task_done()
-                logger.debug(f'Thread released from {repr}')
+                logger.debug(f'Thread released from {job}')
             tm.sleep(1)
 
-    def _charge(self, job, tag):
+    def _charge(self, job: Job, tag: int):
         # Add job to the execution queue.
         try:
             date = dt.datetime.fromtimestamp(tag)
-            repr = f'Job[{job.id}:{tag}]'
-            logger.info(f'Adding {repr} to the queue...')
-            logger.debug(f'Creating new run history record for {repr}...')
+            logger.info(f'Adding {job} to the queue from schedule...')
+            logger.debug(f'Creating new run history record for {job}...')
             conn = db.connect()
             table = db.tables.run_history
             insert = (table.insert().
@@ -494,60 +841,73 @@ class Scheduler():
                              user=self.user))
             result = conn.execute(insert)
             record_id = result.inserted_primary_key[0]
-            job = {'id': job.id,
-                   'env': job.env,
-                   'args': job.args,
-                   'timeout': job.timeout,
-                   'record_id': record_id}
-            logger.debug(f'Created run history record {record_id} for {repr}')
+            logger.debug(f'Created run history record {record_id} for {job}')
+            job = job.to_run(tag, record_id)
             self.queue.put((job, tag))
         except Exception:
             logger.error()
         else:
-            logger.info(f'{repr} added to the queue')
+            logger.info(f'{job} added to the queue from schedule')
         pass
 
-    def _postpone(self, job, tag):
-        if not self.waiting_lists.get(job.id):
-            self.waiting_lists[job.id] = []
-        self.waiting_lists[job.id].append((job, tag))
+    def _postpone(self, job: Job, tag: int):
+        try:
+            date = dt.datetime.fromtimestamp(tag)
+            logger.info(f'Postponing {job}...')
+            logger.debug(f'Creating new run history record for {job}...')
+            conn = db.connect()
+            table = db.tables.run_history
+            insert = (table.insert().
+                      values(job_id=job.id,
+                             run_tag=tag,
+                             run_date=date,
+                             added=dt.datetime.now(),
+                             status='W',
+                             server=self.server,
+                             user=self.user))
+            result = conn.execute(insert)
+            record_id = result.inserted_primary_key[0]
+            logger.debug(f'Created run history record {record_id} for {job}')
+            job = job.to_run(tag, record_id)
+            job.sleep()
+        except Exception:
+            logger.error()
+        else:
+            logger.info(f'{job} postponed')
 
     def _executor(self):
         # Execute jobs registered in the execution queue.
         while True:
-            if self.queue.empty() is False:
+            if not self.queue.empty():
                 job, tag = self.queue.get()
-                id = job['id']
-                repr = f'Job[{id}:{tag}]'
-                logger.debug(f'Thread used by {repr}')
-                logger.debug(f'Job will be executed now {job} ')
+                logger.debug(f'Thread used by {job}')
+                logger.debug(f'{job} will be executed now using {job.config}')
+                job.check_in()
                 self._execute(job, tag)
+                job.check_out()
                 self.queue.task_done()
-                logger.debug(f'Thread released from {repr}')
+                logger.debug(f'Thread released from {job}')
             tm.sleep(1)
-        pass
 
-    def _execute(self, job, tag):
+    def _execute(self, job: Job, tag: int):
         # Execute job.
         try:
-            id = job['id']
-            env = job['env'] or 'python'
-            args = job['args'] or ''
-            timeout = job['timeout']
-            record_id = job['record_id']
-            repr = f'Job[{id}:{tag}]'
-            logger.info(f'Initiating {repr}...')
+            env = job.env or 'python'
+            args = job.args or ''
+            timeout = job.timeout
+            record_id = job.record_id
+            logger.info(f'Initiating {job}...')
             exe = config['ENVIRONMENTS'].get(env)
-            file = os.path.join(self.path, f'jobs/{id}/job.py')
+            file = os.path.join(self.path, f'jobs/{job.id}/job.py')
             args += f' run -a --record {record_id}'
             proc = to_process(exe, file, args)
-            logger.info(f'{repr} runs on PID {proc.pid}')
-            logger.debug(f'Waiting for {repr} to finish...')
+            logger.info(f'{job} runs on PID {proc.pid}')
+            logger.debug(f'Waiting for {job} to finish...')
             self.procs[proc.pid] = proc
             proc.wait(timeout)
             self.procs.pop(proc.pid)
         except sp.TimeoutExpired:
-            logger.warning(f'{repr} timeout exceeded')
+            logger.warning(f'{job} timeout exceeded')
             try:
                 conn = db.connect()
                 table = db.tables.run_history
@@ -562,113 +922,46 @@ class Scheduler():
             logger.error()
         else:
             if proc.returncode > 0:
-                logger.info(F'{repr} completed with error')
+                logger.info(F'{job} completed with error')
                 try:
                     conn = db.connect()
                     table = db.tables.run_history
+                    text_error = proc.stderr.read().decode()
                     update = (table.update().
-                              values(status='E',
-                                     text_error=proc.stderr.read().decode()).
+                              values(status='E', text_error=text_error).
                               where(table.c.id == record_id))
                     conn.execute(update)
                 except Exception:
                     logger.error()
             else:
-                logger.info(f'{repr} completed')
+                logger.info(f'{job} completed')
         pass
 
-    def _check_regular_job(self, job, tag):
-        # Check if regular job is ready for execution.
-        repr = f'Job[{job.id}:{tag}]'
-        ready_to_go = True
-
-        if ready_to_go and job.sleep_period:
-            time_unit = tm.localtime(tag).tm_hour
-            if self._check(job.sleep_period, time_unit):
-                logger.debug(f'{repr} waits due to sleep window')
-                ready_to_go = False
-            elif self.waiting_lists.get(job.id):
-                logger.debug(f'{repr} waits due to waiting runs')
-                ready_to_go = False
-
-        if ready_to_go and job.parallelism:
-            parallelism = job.parallelism
-            parallelism = 999 if parallelism == 'Y' else parallelism
-            parallelism = 1 if parallelism == 'N' else parallelism
-            if isinstance(parallelism, str):
-                if parallelism.isdigit():
-                    parallelism = int(parallelism)
-                else:
-                    parallelism = 1
-            if isinstance(parallelism, int):
-                if self.count_running(job.id) > parallelism:
-                    logger.debug(f'{repr} waits due to parallelism')
-                    ready_to_go = False
-
-        return ready_to_go
-
-    def _check_sleeping_job(self, job, tag):
-        # Check if sleeping job is ready for execution.
-        repr = f'Job[{job.id}:{tag}]'
-        ready_to_go = True
-
-        if ready_to_go and job.sleep_period:
-            time_unit = tm.localtime(self.moment).tm_hour
-            if self._check(job.sleep_period, time_unit):
-                logger.debug(f'{repr} still waits due to sleep window')
-                ready_to_go = False
-
-        if ready_to_go and job.parallelism:
-            parallelism = job.parallelism
-            parallelism = 999 if parallelism == 'Y' else parallelism
-            parallelism = 1 if parallelism == 'N' else parallelism
-            if isinstance(parallelism, str):
-                if parallelism.isdigit():
-                    parallelism = int(parallelism)
-                else:
-                    parallelism = 1
-            if isinstance(parallelism, int):
-                if self.count_running(job.id) > parallelism:
-                    logger.debug(f'{repr} still waits due to parallelism')
-                    ready_to_go = False
-
-        return ready_to_go
-
-    def _rerun_failed_job(self, job):
-        # Rerun failed job.
-        now = dt.datetime.now()
-        delay = config['SCHEDULER']['rerun_delay']
-        interval = config['SCHEDULER']['rerun_interval']
+    def _regain_failed_job(self, job: Job, tag: int):
         try:
-            id = job.job_id
-            tag = job.run_tag
-            repr = f'Job[{id}:{tag}]'
-            status = True if job.status == 'Y' else False
-            start_date = to_timestamp(job.start_date)
-            end_date = to_timestamp(job.end_date)
-            added = to_datetime(job.added)
-            rerun_limit = coalesce(job.rerun_limit, 0)
-            rerun_days = coalesce(job.rerun_days, 0)
-            rerun_times = coalesce(job.rerun_times, 0)
-            date_from = now-dt.timedelta(days=rerun_days)
-            date_to = now-dt.timedelta(seconds=delay+interval)
-            if (
-                status is True
-                and (start_date is None or start_date < self.moment)
-                and (end_date is None or end_date > self.moment)
-                and rerun_times < rerun_limit
-                and added > date_from
-                and added < date_to
-            ):
-                job = {'id': id,
-                       'env': job.environment,
-                       'args': job.arguments,
-                       'timeout': job.timeout,
-                       'record_id': job.id}
-                logger.debug(f'Job will be sent for rerun {job}')
-                logger.info(f'Adding {repr} to the queue for rerun...')
+            logger.debug(f'Checking {job} for rerun using {job.config}')
+            if job.was_active(tag) and job.is_rerun_available():
+                logger.debug(f'{job} rerun allowed')
+                if job.is_ready():
+                    logger.info(f'Adding {job} to the queue for rerun...')
+                    self.queue.put((job, tag))
+                    logger.info(f'{job} added to the queue for rerun')
+                else:
+                    logger.debug(f'{job} is not ready for rerun')
+            else:
+                logger.debug(f'{job} rerun not allowed')
+        except Exception:
+            logger.error()
+
+    def _regain_sleeping_job(self, job: Job, tag: int):
+        try:
+            job.refresh()
+            if job.is_awaken():
+                logger.debug(f'{job} is ready to awake')
+                logger.info(f'Adding {job} to the queue from sleep...')
                 self.queue.put((job, tag))
-                logger.info(f'{repr} added to the queue for rerun')
+                logger.info(f'{job} added to the queue from sleep')
+                self.waiting_lists[job.id].pop(job.record_id)
         except Exception:
             logger.error()
 
@@ -694,14 +987,14 @@ class Scheduler():
         # Configure all necessary threads.
         logger.debug('Making threads for this scheduler...')
 
-        targets = [self._reader, self._rerun, self._wake_up]
-        for i, target in enumerate(targets):
-            name = f'Daemon-{i}'
-            thread = th.Thread(name=name, target=target, daemon=True)
+        reader = th.Thread(name='Scheduler', target=self._reader, daemon=True)
+        rerunner = th.Thread(name='Rerunner', target=self._rerun, daemon=True)
+        waiter = th.Thread(name='Waiter', target=self._wake_up, daemon=True)
+        for thread in [reader, rerunner, waiter]:
             thread.start()
             self.daemons.append(thread)
         number = len(self.daemons)
-        logger.debug(f'{number} daemons made {self.daemons}')
+        logger.debug(f'{number} maintaining daemons made {self.daemons}')
 
         number = config['SCHEDULER']['chargers_number']
         target = self._charger
@@ -939,7 +1232,7 @@ class Job():
     def text_error(self):
         """Get textual exception from the last registered error."""
         if self.errors:
-            err_type, err_value, err_tb = list(self.errors)[-1]
+            err_type, err_value, err_tb = last(self.errors)
             return ''.join(tb.format_exception(err_type, err_value, err_tb))
         else:
             return None
@@ -1063,7 +1356,7 @@ class Job():
             self._start_as_new()
         else:
             logger.debug(f'{self} declared as run[{self.record_id}]')
-            if self.status == 'Q':
+            if self.status in ('Q', 'W'):
                 self.start_date = dt.datetime.now()
                 self.status = 'S'
                 self._start_as_continue()
@@ -1711,7 +2004,7 @@ class Task(Process):
     def text_error(self):
         """Get textual exception from the last registered error."""
         if self.errors:
-            err_type, err_value, err_tb = list(self.errors)[-1]
+            err_type, err_value, err_tb = last(self.errors)
             return ''.join(tb.format_exception(err_type, err_value, err_tb))
         else:
             return None
@@ -2091,7 +2384,7 @@ class Step(Process, Unit):
     def text_error(self):
         """Get textual exception from the last registered error."""
         if self.errors:
-            err_type, err_value, err_tb = list(self.errors)[-1]
+            err_type, err_value, err_tb = last(self.errors)
             return ''.join(tb.format_exception(err_type, err_value, err_tb))
         else:
             return None

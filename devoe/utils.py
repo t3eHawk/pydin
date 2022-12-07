@@ -54,6 +54,16 @@ def declare(object):
     return True
 
 
+def case(value, *options):
+    """Parse the given arguments into a case-logic."""
+    n = len(options)
+    for i, option in enumerate(options):
+        if i % 2 == 0 and i < n-1 and value == option:
+            return options[i+1]
+        elif i % 2 == 0 and i == n-1:
+            return option
+
+
 def coalesce(*args):
     """Pick first non-None value from the list of variables.
 
@@ -72,6 +82,30 @@ def coalesce(*args):
             return arg
 
 
+def first(array):
+    """Get the first value from the array."""
+    if array:
+        if isinstance(array, dict):
+            key_of_first_value = list(array)[0]
+            return array[key_of_first_value]
+        elif isinstance(array, (list, tuple)):
+            return array[0]
+        elif isinstance(array, set):
+            return list(array)[0]
+
+
+def last(array):
+    """Get the last value from the array."""
+    if array:
+        if isinstance(array, dict):
+            key_of_last_value = list(array)[-1]
+            return array[key_of_last_value]
+        elif isinstance(array, (list, tuple)):
+            return array[-1]
+        elif isinstance(array, set):
+            return list(array)[-1]
+
+
 def to_integer(value):
     """."""
     if isinstance(value, int):
@@ -83,6 +117,16 @@ def to_integer(value):
     elif value is None:
         return value
     pass
+
+
+def to_boolean(value):
+    """."""
+    if isinstance(value, bool):
+        return value
+    elif isinstance(value, str):
+        return True if value == 'Y' else False
+    else:
+        return None
 
 
 def to_timestamp(value):
