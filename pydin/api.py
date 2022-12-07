@@ -53,7 +53,7 @@ class Driver():
                 logger.debug(f'File {dest} created')
         else:
             raise Exception(f'file {dest} already exists!')
-        config_path = os.path.join(root, 'devoe.ini')
+        config_path = os.path.join(root, 'pydin.ini')
         config_local = configparser.ConfigParser()
         config_dict = {'SCHEDULER': {'scheduler_name': name or '',
                                      'scheduler_desc': desc or '',
@@ -207,7 +207,7 @@ class Driver():
             else:
                 raise Exception(f'file {dest} already exists!')
 
-        config_path = os.path.join(folder, 'devoe.ini')
+        config_path = os.path.join(folder, 'pydin.ini')
         config_local = configparser.ConfigParser()
         config_dict = {'JOB': {},
                        'LOGGING': {'console': 'True',
@@ -529,7 +529,7 @@ class Driver():
         count = len(staged_files)
         logger.debug(f'{count} files staged')
         if count > 0:
-            message = message or f'devoe[{timestamp}]'
+            message = message or f'pydin[{timestamp}]'
             commit = repo.index.commit(message)
             logger.debug(f'This {message} commit made as <{commit.hexsha}>')
             origin = repo.remote('origin')

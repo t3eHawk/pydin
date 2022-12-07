@@ -17,9 +17,9 @@ from .utils import coalesce
 from .utils import is_path
 
 
-home = os.environ.get('DEVOE_HOME')
-filename = 'devoe.ini'
-user_config = os.path.abspath(os.path.expanduser(f'~/.devoe/{filename}'))
+home = os.environ.get('PYDIN_HOME')
+filename = 'pydin.ini'
+user_config = os.path.abspath(os.path.expanduser(f'~/.pydin/{filename}'))
 home_config = os.path.join(home, filename) if home is not None else None
 local_config = os.path.join(os.path.dirname(sys.argv[0]), filename)
 
@@ -110,7 +110,7 @@ class Logging():
         self.metadata = sa.MetaData()
 
         if task is True:
-            self.task = self.Task(self, table='de_task_history')
+            self.task = self.Task(self, table='pd_task_history')
         elif task is False:
             self.task = self.Task(self, table=None)
         elif isinstance(task, dict):
@@ -124,7 +124,7 @@ class Logging():
                                   database=database, **fields)
 
         if step is True:
-            self.step = self.Step(self, table='de_step_history')
+            self.step = self.Step(self, table='pd_step_history')
         elif step is False:
             self.step = self.Step(self, table=None)
         elif isinstance(step, dict):
@@ -138,7 +138,7 @@ class Logging():
                                   database=database)
 
         if file is True:
-            self.file = self.File(self, table='de_file_log')
+            self.file = self.File(self, table='pd_file_log')
         elif file is False:
             self.file = self.File(self, table=None)
         elif isinstance(file, dict):
@@ -151,7 +151,7 @@ class Logging():
                                   database=database)
 
         if sql is True:
-            self.sql = self.SQL(self, table='de_sql_log')
+            self.sql = self.SQL(self, table='pd_sql_log')
         elif sql is False:
             self.sql = self.SQL(self, table=None)
         elif isinstance(sql, dict):
@@ -176,7 +176,7 @@ class Logging():
             elif isinstance(database, str):
                 self.database = connector.receive(database)
             else:
-                module = il.import_module('devoe.db')
+                module = il.import_module('pydin.db')
                 self.database = module.db
             self.schema = schema if isinstance(schema, str) else None
             self.table = table if isinstance(table, str) else None
@@ -258,7 +258,7 @@ class Logging():
 
         def setup(self):
             """Configure database logger."""
-            logger = pe.logger('devoe.task.logger', table=True,
+            logger = pe.logger('pydin.task.logger', table=True,
                                console=False, file=False, email=False)
             if self.table is None:
                 logger.configure(table=False)
@@ -285,7 +285,7 @@ class Logging():
             elif isinstance(database, str):
                 self.database = connector.receive(database)
             else:
-                module = il.import_module('devoe.db')
+                module = il.import_module('pydin.db')
                 self.database = module.db
             self.schema = schema if isinstance(schema, str) else None
             self.table = table if isinstance(table, str) else None
@@ -377,7 +377,7 @@ class Logging():
 
         def setup(self, step):
             """Configure database logger."""
-            logger = pe.logger(f'devoe.step.{step.seqno}.logger', table=True,
+            logger = pe.logger(f'pydin.step.{step.seqno}.logger', table=True,
                                console=False, file=False, email=False)
             if self.table is None:
                 logger.configure(table=False)
@@ -403,7 +403,7 @@ class Logging():
             elif isinstance(database, str):
                 self.database = connector.receive(database)
             else:
-                module = il.import_module('devoe.db')
+                module = il.import_module('pydin.db')
                 self.database = module.db
             self.schema = schema if isinstance(schema, str) else None
             self.table = table if isinstance(table, str) else None
@@ -443,7 +443,7 @@ class Logging():
 
         def setup(self):
             """Configure database logger."""
-            logger = pe.logger(f'devoe.file.logger', table=True,
+            logger = pe.logger(f'pydin.file.logger', table=True,
                                console=False, file=False, email=False)
             if self.table is None:
                 logger.configure(table=False)
@@ -467,7 +467,7 @@ class Logging():
             elif isinstance(database, str):
                 self.database = connector.receive(database)
             else:
-                module = il.import_module('devoe.db')
+                module = il.import_module('pydin.db')
                 self.database = module.db
             self.schema = schema if isinstance(schema, str) else None
             self.table = table if isinstance(table, str) else None
@@ -515,7 +515,7 @@ class Logging():
 
         def setup(self):
             """Configure database logger."""
-            logger = pe.logger(f'devoe.sql.logger', table=True,
+            logger = pe.logger(f'pydin.sql.logger', table=True,
                                console=False, file=False, email=False)
             if self.table is None:
                 logger.configure(table=False)
@@ -561,7 +561,7 @@ class Server():
         self.sftp = sftp if isinstance(sftp, bool) else False
         self.ftp = ftp if isinstance(ftp, bool) else False
 
-        cache = il.import_module('devoe.cache')
+        cache = il.import_module('pydin.cache')
         cache.CONNECTIONS[f'{self.name}'] = self
         pass
 
@@ -658,7 +658,7 @@ class Database(pe.Database):
                          sid=sid, service=service,
                          user=user, password=password)
 
-        cache = il.import_module('devoe.cache')
+        cache = il.import_module('pydin.cache')
         cache.CONNECTIONS[f'{self.name}'] = self
         pass
 
@@ -674,7 +674,7 @@ class Connector(dict):
 
     def __init__(self):
         super().__init__()
-        self.config = os.path.expanduser('~/.devoe/sources.ini')
+        self.config = os.path.expanduser('~/.pydin/sources.ini')
         pass
 
     class Connection():
@@ -752,7 +752,7 @@ class Connector(dict):
         if isinstance(name, str):
             name = name.lower()
             try:
-                cache = il.import_module('devoe.cache')
+                cache = il.import_module('pydin.cache')
                 return cache.CONNECTIONS[name]
             except KeyError:
                 try:

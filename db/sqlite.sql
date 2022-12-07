@@ -1,9 +1,9 @@
 /*******************************************************************************
-Script to deploy a devoe DB schema in your SQLite environment.
+Script to deploy a PyDin DB schema in your SQLite environment.
 Just run the script then check if all objects created successfully.
 *******************************************************************************/
 
-create table de_schedule (
+create table pd_schedule (
   id              integer primary key autoincrement,
   job_name        text,
   job_description text,
@@ -30,7 +30,7 @@ create table de_schedule (
   updated         text
 );
 
-create table de_run_history (
+create table pd_run_history (
   id          integer primary key autoincrement,
   job_id      integer,
   run_mode    text,
@@ -56,16 +56,16 @@ create table de_run_history (
   updated     text
 );
 
-create index de_run_history_job_ix
-on de_run_history (job_id);
+create index pd_run_history_job_ix
+on pd_run_history (job_id);
 
-create index de_run_history_start_date_ix
-on de_run_history (start_date);
+create index pd_run_history_start_date_ix
+on pd_run_history (start_date);
 
-create index de_run_history_status_ix
-on de_run_history (status);
+create index pd_run_history_status_ix
+on pd_run_history (status);
 
-create table de_task_history (
+create table pd_task_history (
   id              integer primary key autoincrement,
   job_id          integer,
   run_id          integer,
@@ -82,7 +82,7 @@ create table de_task_history (
   updated         text
 );
 
-create table de_step_history (
+create table pd_step_history (
   id              integer primary key autoincrement,
   job_id          integer,
   run_id          integer,
@@ -104,7 +104,7 @@ create table de_step_history (
   updated         text
 );
 
-create table de_file_log (
+create table pd_file_log (
   id          integer primary key autoincrement,
   job_id      integer,
   run_id      integer,
@@ -118,7 +118,7 @@ create table de_file_log (
   end_date    text
 );
 
-create table de_sql_log (
+create table pd_sql_log (
   id          integer primary key autoincrement,
   job_id      integer,
   run_id      integer,
@@ -137,7 +137,7 @@ create table de_sql_log (
   error_text  text
 );
 
-create table de_components (
+create table pd_components (
   id         text primary key,
   server     text,
   user       text,
@@ -149,11 +149,11 @@ create table de_components (
   status     text
 );
 
-insert into de_components (id) values ('SCHEDULER');
-insert into de_components (id) values ('RESTAPI');
+insert into pd_components (id) values ('SCHEDULER');
+insert into pd_components (id) values ('RESTAPI');
 commit;
 
-create table de_job_config (
+create table pd_job_config (
   job_id       integer not null,
   node_seqno   integer not null,
   node_name    text,

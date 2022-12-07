@@ -1,0 +1,9 @@
+pepperoni
+sqlalchemy
+cx_Oracle
+paramiko
+flask
+flask_httpauth
+waitress
+sqlparse
+gitpython

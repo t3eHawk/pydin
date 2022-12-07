@@ -5,7 +5,7 @@ import pepperoni as pe
 from .config import config
 
 
-logger = pe.logger('devoe.core.logger',
+logger = pe.logger('pydin.core.logger',
                    format='{isodate}  {thread}  {rectype}  {message}\n',
                    console=config['LOGGING'].get('console'),
                    file=config['LOGGING'].get('file'),

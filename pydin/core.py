@@ -35,7 +35,7 @@ from .utils import case, coalesce
 from .utils import first, last
 from .utils import to_boolean
 from .utils import to_datetime, to_timestamp
-from .utils import to_process, to_python
+from .utils import to_thread, to_process, to_python
 
 from .config import Logging
 from .config import Localhost, Server, Database
@@ -321,7 +321,7 @@ class Scheduler():
 
         def was_sleeping(self, timestamp):
             """Check if the sleep window was active at a timestamp."""
-            time_unit = self.scheduler.parser(timestamp)
+            time_unit = self.scheduler.parser(timestamp).hour
             if self.scheduler.matcher(self.sleep_period, time_unit):
                 return True
             else:
@@ -987,10 +987,10 @@ class Scheduler():
         # Configure all necessary threads.
         logger.debug('Making threads for this scheduler...')
 
-        reader = th.Thread(name='Scheduler', target=self._reader, daemon=True)
-        rerunner = th.Thread(name='Rerunner', target=self._rerun, daemon=True)
-        waiter = th.Thread(name='Waiter', target=self._wake_up, daemon=True)
-        for thread in [reader, rerunner, waiter]:
+        scheduling = to_thread('Scheduling', self._reader)
+        error_handler = to_thread('ErrorHandler', self._rerun)
+        wait_control = to_thread('WaitControl', self._wake_up)
+        for thread in [scheduling, error_handler, wait_control]:
             thread.start()
             self.daemons.append(thread)
         number = len(self.daemons)
@@ -1243,8 +1243,8 @@ class Job():
         """Build pipeline for this job if configured."""
         if self.configured:
             nodes = []
-            models = imp.import_module('devoe.models')
-            variables = imp.import_module('devoe.vars')
+            models = imp.import_module('pydin.models')
+            variables = imp.import_module('pydin.vars')
             for record in self.configuration:
                 source_name = record['source_name']
                 node_name = record['node_name']
@@ -1303,14 +1303,14 @@ class Job():
     @classmethod
     def get(cls):
         """Get existing job from current execution."""
-        cache = imp.import_module('devoe.cache')
+        cache = imp.import_module('pydin.cache')
         object = getattr(cache, cls.__name__.lower())
         return object
 
     @classmethod
     def exists(cls):
         """Check if job exists in current execution."""
-        cache = imp.import_module('devoe.cache')
+        cache = imp.import_module('pydin.cache')
         if hasattr(cache, cls.__name__.lower()):
             return True
         else:

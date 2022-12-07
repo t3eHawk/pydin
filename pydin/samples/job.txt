@@ -1,12 +1,12 @@
 """Job."""
 
-import devoe
+import pydin
 
 
 if __name__ == '__main__':
-    job = devoe.Job()
+    job = pydin.Job()
 else:
-    job = devoe.cache.Job
+    job = pydin.cache.Job
     logger = job.logger
     sysinfo = job.sysinfo
     creds = job.creds

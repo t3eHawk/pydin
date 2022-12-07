@@ -1,7 +1,7 @@
-devoe
+PyDin
 =====
 
-Devoe is a Python ETL framework that allows you to develop, setup and maintain
+PyDin is a Python ETL framework that allows you to develop, setup and maintain
 ETL processes.
 
 This module was originally a simple standalone script on a small server to run
@@ -13,7 +13,7 @@ workarounds.
 So we just decided that this script must evolve together with a project and
 must become something else.
 
-Devoe follows certain ETL phisolophy that was born in our own expirience.
+PyDin follows certain ETL phisolophy that was born in our own expirience.
 It was created to work in real production environment with thoushands of
 daily jobs.
 

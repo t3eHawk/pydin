@@ -28,7 +28,7 @@ class KeyField:
 
     @property
     def label(self):
-        return f'de_{self.name}'
+        return f'pd_{self.name}'
 
     @property
     def column(self):

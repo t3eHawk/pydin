@@ -1,6 +1,0 @@
-"""Scheduler."""
-
-import devoe
-
-
-scheduler = devoe.Scheduler()

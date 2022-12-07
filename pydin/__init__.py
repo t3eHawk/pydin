@@ -13,13 +13,13 @@ from .models import Files, FileManager
 from .vars import run_id, task_id, step_id, process_id
 
 
-__version__ = '0.0.2'
+__version__ = '0.1.0'
 __status__ = 'Development'
 
 __author__ = 'Timur Faradzhov'
 __email__ = 'timurfaradzhov@gmail.com'
 __license__ = 'MIT'
-__copyright__ = 'Copyright 2022, The Devoe Project'
+__copyright__ = 'Copyright 2022, The PyDin Project'
 __maintainer__ = __author__
 
 __all__ = [Driver, Manager, Interface, Scheduler, Job, Pipeline, Mapper,

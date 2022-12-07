@@ -428,7 +428,7 @@ class Manager():
             from .config import user_config as path
         elif type.isdigit() is True:
             id = self._check_id(type)
-            path = os.path.join(self.root, f'jobs/{id}/devoe.ini')
+            path = os.path.join(self.root, f'jobs/{id}/pydin.ini')
         path = os.path.abspath(path)
         if os.path.exists(path) is True:
             # Launch edition process and wait until it is completed.

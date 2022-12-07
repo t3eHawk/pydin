@@ -1,18 +1,18 @@
 """Setup."""
 
-import devoe
+import pydin
 import setuptools
 
 
-name = devoe.__name__
-version = devoe.__version__
-author = devoe.__author__
-author_email = devoe.__email__
-description = devoe.__doc__.splitlines()[0]
+name = pydin.__name__
+version = pydin.__version__
+author = pydin.__author__
+author_email = pydin.__email__
+description = pydin.__doc__.splitlines()[0]
 long_description = open('README.md', 'r').read()
 long_description_content_type = 'text/markdown'
-license = devoe.__license__
-url = 'https://github.com/t3eHawk/devoe'
+license = pydin.__license__
+url = 'https://github.com/t3eHawk/pydin'
 install_requires = ['pepperoni', 'sqlalchemy', 'cx_Oracle', 'paramiko',
                     'flask', 'flask_httpauth', 'waitress',
                     'sqlparse', 'gitpython']

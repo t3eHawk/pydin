@@ -1,9 +1,9 @@
 /*******************************************************************************
-Script to deploy a devoe DB schema in your Oracle environment.
+Script to deploy a PyDin DB schema in your Oracle environment.
 Just run the script then check if all objects created successfully.
 *******************************************************************************/
 
-create table de_schedule (
+create table pd_schedule (
   id              number(*, 0),
   job_name        varchar2(30 char),
   job_description varchar2(30 char),
@@ -28,23 +28,23 @@ create table de_schedule (
   debug           varchar2(1 char),
   created         date,
   updated         date,
-  constraint de_schedule_pk primary key (id)
+  constraint pd_schedule_pk primary key (id)
 );
 
-create sequence de_schedule_seq
+create sequence pd_schedule_seq
 increment by 1
 start with 1
 nocache;
 
-create or replace trigger de_schedule_id_trg
-before insert on de_schedule
+create or replace trigger pd_schedule_id_trg
+before insert on pd_schedule
 for each row
 begin
-  select de_schedule_seq.nextval into :new.id from dual;
+  select pd_schedule_seq.nextval into :new.id from dual;
 end;
 /
 
-create table de_run_history (
+create table pd_run_history (
   id          number(*, 0),
   job_id      number(*, 0),
   run_mode    varchar2(25 char),
@@ -68,32 +68,32 @@ create table de_run_history (
   text_error  clob,
   data_dump   blob,
   updated     date,
-  constraint de_run_history_pk primary key (id)
+  constraint pd_run_history_pk primary key (id)
 );
 
-create index de_run_history_job_ix
-on de_run_history (job_id);
+create index pd_run_history_job_ix
+on pd_run_history (job_id);
 
-create index de_run_history_start_date_ix
-on de_run_history (start_date);
+create index pd_run_history_start_date_ix
+on pd_run_history (start_date);
 
-create index de_run_history_status_ix
-on de_run_history (status);
+create index pd_run_history_status_ix
+on pd_run_history (status);
 
-create sequence de_run_history_seq
+create sequence pd_run_history_seq
 increment by 1
 start with 1
 nocache;
 
-create or replace trigger de_run_history_id_trg
-before insert on de_run_history
+create or replace trigger pd_run_history_id_trg
+before insert on pd_run_history
 for each row
 begin
-  select de_run_history_seq.nextval into :new.id from dual;
+  select pd_run_history_seq.nextval into :new.id from dual;
 end;
 /
 
-create table de_task_history (
+create table pd_task_history (
   id              number(*, 0),
   job_id          number(*, 0),
   run_id          number(*, 0),
@@ -108,23 +108,23 @@ create table de_task_history (
   result_value    number(*, 0),
   result_long     varchar2(4000 char),
   updated         date,
-  constraint de_task_history_pk primary key (id)
+  constraint pd_task_history_pk primary key (id)
 );
 
-create sequence de_task_history_seq
+create sequence pd_task_history_seq
 increment by 1
 start with 1
 nocache;
 
-create or replace trigger de_task_history_id_trg
-before insert on de_task_history
+create or replace trigger pd_task_history_id_trg
+before insert on pd_task_history
 for each row
 begin
-  select de_task_history_seq.nextval into :new.id from dual;
+  select pd_task_history_seq.nextval into :new.id from dual;
 end;
 /
 
-create table de_step_history (
+create table pd_step_history (
   id              number(*, 0),
   job_id          number(*, 0),
   run_id          number(*, 0),
@@ -144,23 +144,23 @@ create table de_step_history (
   result_value    number(*, 0),
   result_long     varchar2(4000 char),
   updated         date,
-  constraint de_step_history_pk primary key (id)
+  constraint pd_step_history_pk primary key (id)
 );
 
-create sequence de_step_history_seq
+create sequence pd_step_history_seq
 increment by 1
 start with 1
 nocache;
 
-create or replace trigger de_step_history_id_trg
-before insert on de_step_history
+create or replace trigger pd_step_history_id_trg
+before insert on pd_step_history
 for each row
 begin
-  select de_step_history_seq.nextval into :new.id from dual;
+  select pd_step_history_seq.nextval into :new.id from dual;
 end;
 /
 
-create table de_file_log (
+create table pd_file_log (
   id         number(*, 0),
   job_id     number(*, 0),
   run_id     number(*, 0),
@@ -172,23 +172,23 @@ create table de_file_log (
   file_size  number(*, 0),
   start_date date,
   end_date   date,
-  constraint de_file_log_pk primary key (id)
+  constraint pd_file_log_pk primary key (id)
 );
 
-create sequence de_file_log_seq
+create sequence pd_file_log_seq
 increment by 1
 start with 1
 nocache;
 
-create or replace trigger de_file_log_id_trg
-before insert on de_file_log
+create or replace trigger pd_file_log_id_trg
+before insert on pd_file_log
 for each row
 begin
-  select de_file_log_seq.nextval into :new.id from dual;
+  select pd_file_log_seq.nextval into :new.id from dual;
 end;
 /
 
-create table de_sql_log (
+create table pd_sql_log (
   id          number(*, 0),
   job_id      number(*, 0),
   run_id      number(*, 0),
@@ -205,23 +205,23 @@ create table de_sql_log (
   output_text varchar2(4000 char),
   error_code  number(*, 0),
   error_text  varchar2(4000 char),
-  constraint de_sql_log_pk primary key (id)
+  constraint pd_sql_log_pk primary key (id)
 );
 
-create sequence de_sql_log_seq
+create sequence pd_sql_log_seq
 increment by 1
 start with 1
 nocache;
 
-create or replace trigger de_sql_log_id_trg
-before insert on de_sql_log
+create or replace trigger pd_sql_log_id_trg
+before insert on pd_sql_log
 for each row
 begin
-  select de_sql_log_seq.nextval into :new.id from dual;
+  select pd_sql_log_seq.nextval into :new.id from dual;
 end;
 /
 
-create table de_components (
+create table pd_components (
   id         varchar2(100 char),
   server     varchar2(100 char),
   user       varchar2(100 char),
@@ -231,14 +231,14 @@ create table de_components (
   start_date date,
   stop_date  date,
   status     varchar2(1 char),
-  constraint de_components_pk primary key (id)
+  constraint pd_components_pk primary key (id)
 );
 
-insert into de_components (id) values ('SCHEDULER');
-insert into de_components (id) values ('RESTAPI');
+insert into pd_components (id) values ('SCHEDULER');
+insert into pd_components (id) values ('RESTAPI');
 commit;
 
-create table de_job_config (
+create table pd_job_config (
   job_id       number(*, 0) not null,
   node_seqno   number(*, 0) not null,
   node_name    varchar2(100 char),

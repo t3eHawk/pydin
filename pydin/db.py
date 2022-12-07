@@ -45,14 +45,14 @@ class Database(pe.Database):
 
         def __init__(self, database):
             self.database = database
-            self.schedule = self.load('de_schedule')
-            self.components = self.load('de_components')
-            self.run_history = self.load('de_run_history')
-            self.task_history = self.load('de_task_history')
-            self.step_history = self.load('de_step_history')
-            self.sql_log = self.load('de_sql_log')
-            self.file_log = self.load('de_file_log')
-            self.job_config = self.load('de_job_config')
+            self.schedule = self.load('pd_schedule')
+            self.components = self.load('pd_components')
+            self.run_history = self.load('pd_run_history')
+            self.task_history = self.load('pd_task_history')
+            self.step_history = self.load('pd_step_history')
+            self.sql_log = self.load('pd_sql_log')
+            self.file_log = self.load('pd_file_log')
+            self.job_config = self.load('pd_job_config')
             pass
 
         def load(self, table_name=None):

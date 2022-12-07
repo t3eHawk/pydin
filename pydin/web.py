@@ -23,7 +23,7 @@ from .utils import to_process
 
 app = flask.Flask(__name__)
 auth = flask_httpauth.HTTPTokenAuth(scheme='Bearer')
-root = os.environ['DEVOE_HOME'] if os.environ.get('DEVOE_HOME') else locate()
+root = os.environ['PYDIN_HOME'] if os.environ.get('PYDIN_HOME') else locate()
 TOKEN = config['API']['token']
 
 
@@ -69,9 +69,9 @@ class Interface():
         """Start API server."""
         self.status = True
         self.start_date = dt.datetime.now()
-        app = 'devoe.web:app'
+        app = 'pydin.web:app'
         env = os.environ.copy()
-        env['DEVOE_HOME'] = locate()
+        env['PYDIN_HOME'] = locate()
         if self.dev is True:
             script = ['flask', 'run']
             args = ['--host', self.host, '--port', str(self.port)]

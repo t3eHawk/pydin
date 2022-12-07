@@ -40,7 +40,7 @@ def cache(object):
     value : bool
         Always True value indicating that object was successfully stored.
     """
-    namespace = imp.import_module('devoe.cache')
+    namespace = imp.import_module('pydin.cache')
     name = object.__class__.__name__.lower()
     setattr(namespace, name, object)
     return True
@@ -48,7 +48,7 @@ def cache(object):
 
 def declare(object):
     """."""
-    namespace = imp.import_module('devoe')
+    namespace = imp.import_module('pydin')
     name = object.__class__.__name__.lower()
     setattr(namespace, name, object)
     return True
