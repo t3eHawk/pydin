@@ -107,15 +107,16 @@ class Scheduler():
         """Represents scheduler job."""
 
         def __init__(self, id, scheduler, name=None, desc=None, status=None,
-                     mday=None, wday=None, hour=None, min=None, sec=None,
-                     trigger_id=None, start_timestamp=None, end_timestamp=None,
+                     mday=None, hour=None, min=None, sec=None,
+                     wday=None, yday=None, trigger_id=None,
+                     start_timestamp=None, end_timestamp=None,
                      env=None, args=None, timeout=None, parallelism=None,
                      rerun_times=None, rerun_limit=None, rerun_days=None,
                      sleep_period=None, tag=None, record_id=None, added=None):
             self.id, self.scheduler = id, scheduler
             self.setup(name=name, desc=desc, status=status,
-                       hour=hour, min=min, sec=sec,
-                       mday=mday, wday=wday, trigger_id=trigger_id,
+                       mday=mday, hour=hour, min=min, sec=sec,
+                       wday=wday, yday=yday, trigger_id=trigger_id,
                        start_timestamp=start_timestamp,
                        end_timestamp=end_timestamp,
                        env=env, args=args,
@@ -153,10 +154,11 @@ class Scheduler():
                 desc=self.desc,
                 status=self.status,
                 mday=self.mday,
-                wday=self.wday,
                 hour=self.hour,
                 min=self.min,
                 sec=self.sec,
+                wday=self.wday,
+                yday=self.yday,
                 trigger_id=self.trigger_id,
                 start_timestamp=self.start_timestamp,
                 end_timestamp=self.end_timestamp,
@@ -170,8 +172,9 @@ class Scheduler():
             )
 
         def setup(self, name=None, desc=None, status=None,
-                  mday=None, wday=None, hour=None, min=None, sec=None,
-                  trigger_id=None, start_timestamp=None, end_timestamp=None,
+                  mday=None, hour=None, min=None, sec=None,
+                  wday=None, yday=None, trigger_id=None,
+                  start_timestamp=None, end_timestamp=None,
                   env=None, args=None, timeout=None, parallelism=None,
                   rerun_times=None, rerun_limit=None, rerun_days=None,
                   sleep_period=None, tag=None, record_id=None, added=None):
@@ -180,10 +183,11 @@ class Scheduler():
             self.desc = desc
             self.status = to_boolean(status)
             self.mday = mday
-            self.wday = wday
             self.hour = hour
             self.min = min
             self.sec = sec
+            self.wday = wday
+            self.yday = yday
             self.trigger_id = trigger_id
             self.start_timestamp = to_timestamp(start_timestamp)
             self.end_timestamp = to_timestamp(end_timestamp)
@@ -226,11 +230,12 @@ class Scheduler():
             self.setup(name=record.job_name,
                        desc=record.job_description,
                        status=record.status,
+                       mday=record.monthday,
                        hour=record.hour,
                        min=record.minute,
                        sec=record.second,
-                       mday=record.monthday,
                        wday=record.weekday,
+                       yday=record.yearday,
                        trigger_id=record.trigger_id,
                        start_timestamp=record.start_date,
                        end_timestamp=record.end_date,
@@ -251,10 +256,11 @@ class Scheduler():
                        desc=record.job_description,
                        status=record.status,
                        mday=record.monthday,
-                       wday=record.weekday,
                        hour=record.hour,
                        min=record.minute,
                        sec=record.second,
+                       wday=record.weekday,
+                       yday=record.yearday,
                        trigger_id=record.trigger_id,
                        start_timestamp=record.start_date,
                        end_timestamp=record.end_date,
@@ -306,10 +312,11 @@ class Scheduler():
             time = self.scheduler.parser(timestamp)
             if (
                 self.scheduler.matcher(self.mday, time.mday)
-                and self.scheduler.matcher(self.wday, time.wday)
                 and self.scheduler.matcher(self.hour, time.hour)
                 and self.scheduler.matcher(self.min, time.min)
                 and self.scheduler.matcher(self.sec, time.sec)
+                and self.scheduler.matcher(self.wday, time.wday)
+                and self.scheduler.matcher(self.yday, time.yday)
             ):
                 return True
             else:
@@ -507,7 +514,7 @@ class Scheduler():
         select = (sa.select([h.c.id, h.c.job_id, h.c.run_tag, h.c.added,
                              s.c.job_name, s.c.job_description, s.c.status,
                              s.c.hour, s.c.minute, s.c.second,
-                             s.c.monthday, s.c.weekday,
+                             s.c.yearday, s.c.monthday, s.c.weekday,
                              s.c.trigger_id, s.c.start_date, s.c.end_date,
                              s.c.environment, s.c.arguments,
                              s.c.timeout, s.c.parallelism, s.c.sleep_period,
@@ -531,7 +538,7 @@ class Scheduler():
         select = (sa.select([h.c.id, h.c.job_id, h.c.run_tag, h.c.added,
                              s.c.job_name, s.c.job_description, s.c.status,
                              s.c.hour, s.c.minute, s.c.second,
-                             s.c.monthday, s.c.weekday,
+                             s.c.yearday, s.c.monthday, s.c.weekday,
                              s.c.trigger_id, s.c.start_date, s.c.end_date,
                              s.c.environment, s.c.arguments,
                              s.c.timeout, s.c.parallelism, s.c.sleep_period,
@@ -551,10 +558,11 @@ class Scheduler():
         namespace = types.SimpleNamespace(
             timestamp=timestamp,
             mday=structure.tm_mday,
-            wday=structure.tm_wday+1,
             hour=structure.tm_hour,
             min=structure.tm_min,
-            sec=structure.tm_sec
+            sec=structure.tm_sec,
+            wday=structure.tm_wday+1,
+            yday=structure.tm_yday
         )
         return namespace
 
