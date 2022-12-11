@@ -106,7 +106,7 @@ class Logging():
     """Represents logging configurator used for special loggers."""
 
     def __init__(self, task=True, step=True, file=False, sql=False,
-                 database=None, schema=None, table=None,  **fields):
+                 database=None, schema=None, table=None):
         self.metadata = sa.MetaData()
 
         if task is True:
@@ -116,12 +116,11 @@ class Logging():
         elif isinstance(task, dict):
             self.task = self.Task(self, table=task.get('table', table),
                                   schema=task.get('schema', schema),
-                                  database=task.get('database', database),
-                                  **task.get('fields', fields))
+                                  database=task.get('database', database))
         else:
             table = table if not isinstance(task, str) else task
             self.task = self.Task(self, table=table, schema=schema,
-                                  database=database, **fields)
+                                  database=database)
 
         if step is True:
             self.step = self.Step(self, table='pd_step_history')
@@ -130,8 +129,7 @@ class Logging():
         elif isinstance(step, dict):
             self.step = self.Step(self, table=step.get('table'),
                                   schema=step.get('schema', schema),
-                                  database=step.get('database', database),
-                                  **step.get('fields', {}))
+                                  database=step.get('database', database))
         else:
             table = None if not isinstance(step, str) else step
             self.step = self.Step(self, table=table, schema=schema,
@@ -167,8 +165,7 @@ class Logging():
     class Task():
         """Represents task logger configurator."""
 
-        def __init__(self, logging, database=None,
-                     schema=None, table=None, **fields):
+        def __init__(self, logging, database=None, schema=None, table=None):
             self.logging = logging if isinstance(logging, Logging) else None
             self.database = database if isinstance(database, str) else None
             if isinstance(database, Database) is True:
@@ -180,28 +177,6 @@ class Logging():
                 self.database = module.db
             self.schema = schema if isinstance(schema, str) else None
             self.table = table if isinstance(table, str) else None
-            self.fields = {'records_read': True,
-                           'records_written': True,
-                           'records_error': True,
-                           'result_value': True,
-                           'result_long': True,
-                           'mode': False,
-                           'server': False,
-                           'user': False,
-                           'file_log': False,
-                           'text_log': False,
-                           'text_error': False}
-            self.optional = [key for key, value in self.fields.items()
-                             if value is False]
-            self.modify(**fields)
-            pass
-
-        def modify(self, **fields):
-            """Modify table structure."""
-            for key, value in fields.items():
-                if key in self.fields.keys():
-                    if isinstance(value, bool):
-                        self.fields[key] = value
             pass
 
         def create_table(self):
@@ -236,22 +211,8 @@ class Logging():
                                  comment='Short numeric execution result'),
                        sa.Column('result_long', sa.String(512),
                                  comment='Long string execution result'),
-                       sa.Column('mode', sa.String(1),
-                                 comment='Type of initiation in the task'),
-                       sa.Column('server', sa.String(30),
-                                 comment='Host address with process'),
-                       sa.Column('user', sa.String(30),
-                                 comment='OS user who launched the process'),
-                       sa.Column('file_log', sa.String(30),
-                                 comment='Path to the log file'),
-                       sa.Column('text_log', sa.Text,
-                                 comment='Textual log records'),
-                       sa.Column('text_error', sa.Text,
-                                 comment='Textual error'),
                        sa.Column('updated', sa.DateTime,
                                  comment='Date of this record change')]
-            columns = [column for column in columns
-                       if self.fields.get(column.name, True) is True]
             table = sa.Table(name, metadata, *columns, schema=schema)
             table.create(self.database.engine, checkfirst=True)
             return table
@@ -276,8 +237,7 @@ class Logging():
     class Step():
         """Represents step logger configurator."""
 
-        def __init__(self, logging, database=None,
-                     schema=None, table=None, **fields):
+        def __init__(self, logging, database=None, schema=None, table=None):
             self.logging = logging if isinstance(logging, Logging) else None
             self.database = database if isinstance(database, str) else None
             if isinstance(database, Database) is True:
@@ -289,28 +249,6 @@ class Logging():
                 self.database = module.db
             self.schema = schema if isinstance(schema, str) else None
             self.table = table if isinstance(table, str) else None
-            self.fields = {'records_read': True,
-                           'records_written': True,
-                           'records_error': True,
-                           'result_value': True,
-                           'result_long': True,
-                           'mode': False,
-                           'server': False,
-                           'user': False,
-                           'file_log': False,
-                           'text_log': False,
-                           'text_error': False}
-            self.optional = [key for key, value in self.fields.items()
-                             if value is False]
-            self.modify(**fields)
-            pass
-
-        def modify(self, **fields):
-            """Modify table structure."""
-            for key, value in fields.items():
-                if key in self.fields.keys():
-                    if isinstance(value, bool):
-                        self.fields[key] = value
             pass
 
         def create_table(self):
@@ -355,22 +293,8 @@ class Logging():
                                  comment='Short numeric result of execution'),
                        sa.Column('result_long', sa.String(512),
                                  comment='Long string result of execution'),
-                       sa.Column('mode', sa.String(1),
-                                 comment='Type of initiation in the task'),
-                       sa.Column('server', sa.String(30),
-                                 comment='Host address with process'),
-                       sa.Column('user', sa.String(30),
-                                 comment='OS user who launched the process'),
-                       sa.Column('file_log', sa.String(30),
-                                 comment='Path to the log file'),
-                       sa.Column('text_log', sa.Text,
-                                 comment='Textual log records'),
-                       sa.Column('text_error', sa.Text,
-                                 comment='Textual error'),
                        sa.Column('updated', sa.DateTime,
                                  comment='Date of this record change')]
-            columns = [column for column in columns
-                       if self.fields.get(column.name, True) is True]
             table = sa.Table(name, metadata, *columns, schema=schema)
             table.create(self.database.engine, checkfirst=True)
             return table

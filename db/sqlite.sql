@@ -41,19 +41,19 @@ create table pd_run_history (
   start_date  text,
   end_date    text,
   status      text,
-  server      text,
-  user        text,
+  server_name text,
+  user_name   text,
   pid         integer,
-  trigger_id  integer,
+  error_list  text,
   rerun_id    integer,
   rerun_seqno integer,
   rerun_times integer,
   rerun_now   text,
   rerun_done  text,
+  trigger_id  integer,
+  data_dump   blob,
   file_log    text,
   text_log    text,
-  text_error  text,
-  data_dump   blob,
   updated     text
 );
 
@@ -67,42 +67,44 @@ create index pd_run_history_status_ix
 on pd_run_history (status);
 
 create table pd_task_history (
-  id              integer primary key autoincrement,
-  job_id          integer,
-  run_id          integer,
-  task_name       text,
-  task_date       text,
-  start_date      text,
-  end_date        text,
-  status          text,
-  records_read    integer,
-  records_written integer,
-  records_error   integer,
-  result_value    integer,
-  result_long     integer,
-  updated         text
+  id                integer primary key autoincrement,
+  job_id            integer,
+  run_id            integer,
+  task_name         text,
+  task_date         text,
+  start_date        text,
+  end_date          text,
+  status            text,
+  records_read      integer,
+  records_written   integer,
+  records_processed integer,
+  records_error     integer,
+  result_value      integer,
+  result_long       text,
+  updated           text
 );
 
 create table pd_step_history (
-  id              integer primary key autoincrement,
-  job_id          integer,
-  run_id          integer,
-  task_id         integer,
-  step_name       text,
-  step_type       text,
-  step_a          text,
-  step_b          text,
-  step_c          text,
-  step_date       text,
-  start_date      text,
-  end_date        text,
-  status          text,
-  records_read    integer,
-  records_written integer,
-  records_error   integer,
-  result_value    integer,
-  result_long     text,
-  updated         text
+  id                integer primary key autoincrement,
+  job_id            integer,
+  run_id            integer,
+  task_id           integer,
+  step_name         text,
+  step_type         text,
+  step_a            text,
+  step_b            text,
+  step_c            text,
+  step_date         text,
+  start_date        text,
+  end_date          text,
+  status            text,
+  records_read      integer,
+  records_written   integer,
+  records_processed integer,
+  records_error     integer,
+  result_value      integer,
+  result_long       text,
+  updated           text
 );
 
 create table pd_file_log (
@@ -139,15 +141,15 @@ create table pd_sql_log (
 );
 
 create table pd_components (
-  id         text primary key,
-  server     text,
-  user       text,
-  pid        integer,
-  url        text,
-  debug      text,
-  start_date text,
-  stop_date  text,
-  status     text
+  id          text primary key,
+  server_name text,
+  user_name   text,
+  pid         integer,
+  url         text,
+  debug       text,
+  start_date  text,
+  stop_date   text,
+  status      text
 );
 
 insert into pd_components (id) values ('SCHEDULER');

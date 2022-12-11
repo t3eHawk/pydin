@@ -46,8 +46,8 @@ class Interface():
         if config['API'].get('host'):
             self.port = config['API'].get('port')
 
-        self.server = platform.node()
-        self.user = os.getlogin()
+        self.server_name = platform.node()
+        self.user_name = os.getlogin()
         self.start_date = None
         self.stop_date = None
         self.status = None
@@ -97,7 +97,8 @@ class Interface():
             update = update.values(status='Y', pid=pid,
                                    start_date=self.start_date,
                                    stop_date=self.stop_date,
-                                   server=self.server, user=self.user)
+                                   server_name=self.server_name,
+                                   user_name=self.user_name)
             conn.execute(update)
         pass
 

@@ -5,6 +5,7 @@ import datetime as dt
 import gzip
 import json
 import os
+import sys
 import re
 import shutil
 import stat
@@ -238,14 +239,22 @@ class Extractable():
     def extractor(self, step, queue):
         """Extract data."""
         logger.info(f'Reading records from {self}...')
-        for dataset in self.extract(step):
-            try:
-                queue.put(dataset)
-                count = len(dataset)
-                step.records_read = count
-                logger.info(f'{step.records_read} records read')
-            except Exception:
-                logger.error()
+        try:
+            for dataset in self.extract(step):
+                try:
+                    queue.put(dataset)
+                    step.records_read = len(dataset)
+                    logger.info(f'{step.records_read} records read')
+                except Exception:
+                    step.records_error = len(dataset)
+                    logger.info(f'{step.records_error} records with error')
+                    logger.error()
+                    step.error_handler()
+                    if len(step.errors) >= step.pipeline.error_limit:
+                        break
+        except Exception:
+            logger.error()
+            step.error_handler()
         pass
 
     def extract(self):
@@ -269,28 +278,31 @@ class Transformable():
         logger.debug(f'Starting {self.thread.name}...')
         return self.thread.start()
 
-    def transformator(self, step, input, output):
+    def transformator(self, step, input_queue, output_queue):
         """Transform data."""
         logger.info(f'Processing records of {self}...')
-        records_processed = 0
         while True:
-            if input.empty() is True:
+            if input_queue.empty() is True:
                 if step.extraction is True:
                     tm.sleep(0.001)
                     continue
                 break
             else:
-                inputs = input.get()
+                input_records = input_queue.get()
                 try:
-                    outputs = list(map(self.transform, inputs))
+                    output_records = list(map(self.transform, input_records))
+                    output_queue.put(output_records)
+                    step.records_processed = len(output_records)
+                    logger.info(f'{step.records_processed} records processed')
                 except Exception:
+                    step.records_error = len(input_records)
+                    logger.info(f'{step.records_error} records with error')
                     logger.error()
+                    step.error_handler()
+                    if len(step.errors) >= step.pipeline.error_limit:
+                        break
                 else:
-                    output.put(outputs)
-                    count = len(outputs)
-                    records_processed += count
-                    logger.info(f'{records_processed} records processed')
-                    input.task_done()
+                    input_queue.task_done()
         pass
 
     def transform(self):
@@ -327,12 +339,16 @@ class Loadable():
                 dataset = queue.get()
                 try:
                     result = self.load(step, dataset)
-                except Exception:
-                    logger.error()
-                else:
-                    count = len(coalesce(result, dataset))
-                    step.records_written = count
+                    step.records_written = len(coalesce(result, dataset))
                     logger.info(f'{step.records_written} records written')
+                except Exception:
+                    step.records_error = len(dataset)
+                    logger.info(f'{step.records_error} records with error')
+                    logger.error()
+                    step.error_handler()
+                    if len(step.errors) >= step.pipeline.error_limit:
+                        break
+                else:
                     queue.task_done()
         pass
 
@@ -367,6 +383,7 @@ class Executable():
                 setattr(step, 'result_long', result)
         except Exception:
             logger.error()
+            step.error_handler()
         pass
 
     def execute(self):

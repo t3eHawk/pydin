@@ -71,8 +71,8 @@ class Scheduler():
         self.chargers = []
         self.executors = []
 
-        self.server = platform.node()
-        self.user = os.getlogin()
+        self.server_name = platform.node()
+        self.user_name = os.getlogin()
         self.pid = os.getpid()
         self.start_date = None
         self.stop_date = None
@@ -845,8 +845,8 @@ class Scheduler():
                              run_date=date,
                              added=dt.datetime.now(),
                              status='Q',
-                             server=self.server,
-                             user=self.user))
+                             server_name=self.server_name,
+                             user_name=self.user_name))
             result = conn.execute(insert)
             record_id = result.inserted_primary_key[0]
             logger.debug(f'Created run history record {record_id} for {job}')
@@ -871,8 +871,8 @@ class Scheduler():
                              run_date=date,
                              added=dt.datetime.now(),
                              status='W',
-                             server=self.server,
-                             user=self.user))
+                             server_name=self.server_name,
+                             user_name=self.user_name))
             result = conn.execute(insert)
             record_id = result.inserted_primary_key[0]
             logger.debug(f'Created run history record {record_id} for {job}')
@@ -936,7 +936,7 @@ class Scheduler():
                     table = db.tables.run_history
                     text_error = proc.stderr.read().decode()
                     update = (table.update().
-                              values(status='E', text_error=text_error).
+                              values(status='E', error_list=text_error).
                               where(table.c.id == record_id))
                     conn.execute(update)
                 except Exception:
@@ -1034,8 +1034,8 @@ class Scheduler():
             update = update.values(status='Y',
                                    start_date=self.start_date,
                                    stop_date=None,
-                                   server=self.server,
-                                   user=self.user,
+                                   server_name=self.server_name,
+                                   user_name=self.user_name,
                                    pid=self.pid)
         elif self.status is False:
             update = update.values(status='N',
@@ -1118,8 +1118,8 @@ class Job():
                          debug=self.debug, alarming=self.alarm,
                          smtp={'recipients': self.email_list})
 
-        self.server = platform.node()
-        self.user = os.getlogin()
+        self.server_name = platform.node()
+        self.user_name = os.getlogin()
         self.pid = os.getpid()
         self.file_log = self._parse_file_log()
         self.text_log = None
@@ -1238,13 +1238,16 @@ class Job():
 
     @property
     def text_error(self):
-        """Get textual exception from the last registered error."""
+        """Get textual representation of all found errors."""
         if self.errors:
-            err_type, err_value, err_tb = last(self.errors)
-            return ''.join(tb.format_exception(err_type, err_value, err_tb))
+            text_list = []
+            for err_type, err_value, err_tb in self.errors:
+                exception = tb.format_exception(err_type, err_value, err_tb)
+                text = ''.join(exception)
+                text_list.append(text)
+            return f'{"":->34}\n'.join(text_list)
         else:
             return None
-        pass
 
     @property
     def pipeline(self):
@@ -1406,8 +1409,8 @@ class Job():
                           trigger_id=self.trigger_id,
                           rerun_id=self.initiator_id,
                           rerun_seqno=self.seqno,
-                          server=self.server,
-                          user=self.user,
+                          server_name=self.server_name,
+                          user_name=self.user_name,
                           pid=self.pid,
                           file_log=self.file_log)
         pass
@@ -1418,8 +1421,8 @@ class Job():
         self.record.write(run_mode=self.mode,
                           start_date=self.start_date,
                           status=self.status,
-                          server=self.server,
-                          user=self.user,
+                          server_name=self.server_name,
+                          user_name=self.user_name,
                           pid=self.pid,
                           file_log=self.file_log)
         pass
@@ -1441,8 +1444,8 @@ class Job():
                           trigger_id=self.trigger_id,
                           rerun_id=self.initiator_id,
                           rerun_seqno=self.seqno,
-                          server=self.server,
-                          user=self.user,
+                          server_name=self.server_name,
+                          user_name=self.user_name,
                           pid=self.pid,
                           file_log=self.file_log)
         self.initiator.write(rerun_now='Y')
@@ -1479,7 +1482,7 @@ class Job():
         self.status = self._done() if not self.errors else self._error()
         self.end_date = dt.datetime.now()
         self.record.write(end_date=self.end_date, status=self.status,
-                          text_error=self.text_error,
+                          error_list=self.text_error,
                           data_dump=pickle.dumps(self.data))
         if self.initiator_id:
             rerun_done = 'Y' if self.status == 'D' else None
@@ -1632,9 +1635,11 @@ class Job():
 class Pipeline():
     """Represents ETL pipeline."""
 
-    def __init__(self, *nodes, name=None, date=None, logging=None):
+    def __init__(self, *nodes, name=None, date=None, error_limit=1,
+                 logging=None):
         self.name = name or self.__class__.__name__
         self.date = date
+        self.error_limit = error_limit
 
         self.task = Task()
         self.steps = {}
@@ -1648,6 +1653,7 @@ class Pipeline():
                 self.name = self.job.name
             if self.job.date:
                 self.date = self.job.date
+
         self.logging = logging if isinstance(logging, Logging) else Logging()
         self.calendar = calendar.Day(self.date)
 
@@ -1804,6 +1810,20 @@ class Process():
             self._name = None
         pass
 
+    def error_handler(self):
+        """Process last error."""
+        exc_info = sys.exc_info()
+        if exc_info:
+            self.errors.add(exc_info)
+            if isinstance(self, Task):
+                if self.pipeline.job:
+                    self.pipeline.job.errors.add(exc_info)
+            if isinstance(self, Step):
+                if self.pipeline:
+                    self.pipeline.task.errors.add(exc_info)
+                    if self.pipeline.job:
+                        self.pipeline.job.errors.add(exc_info)
+
     pass
 
 
@@ -1895,9 +1915,10 @@ class Task(Process):
         self._status = None
         self._records_read = 0
         self._records_written = 0
-        self._records_found = 0
-        self._files_found = 0
-        self._bytes_found = 0
+        self._records_processed = 0
+        self._records_error = 0
+        self._result_value = 0
+        self._result_long = 0
         self.errors = set()
         self.updated = None
         pass
@@ -1985,6 +2006,30 @@ class Task(Process):
         pass
 
     @property
+    def records_processed(self):
+        """Get number of records processed."""
+        return self._records_processed
+
+    @records_written.setter
+    def records_processed(self, value):
+        if isinstance(value, int):
+            self._records_processed += value
+            self.logger.table(records_processed=self.records_processed)
+        pass
+
+    @property
+    def records_error(self):
+        """Get number of records with error."""
+        return self._records_error
+
+    @records_error.setter
+    def records_error(self, value):
+        if isinstance(value, int):
+            self._records_error += value
+            self.logger.table(records_error=self.records_error)
+        pass
+
+    @property
     def result_value(self):
         """Get short numeric result value."""
         return self._result_value
@@ -2006,16 +2051,6 @@ class Task(Process):
         if isinstance(value, (list, tuple, dict, str)):
             self._result_long = value
             self.logger.table(result_long=str(self.result_long))
-        pass
-
-    @property
-    def text_error(self):
-        """Get textual exception from the last registered error."""
-        if self.errors:
-            err_type, err_value, err_tb = last(self.errors)
-            return ''.join(tb.format_exception(err_type, err_value, err_tb))
-        else:
-            return None
         pass
 
     def setup(self, pipeline):
@@ -2139,9 +2174,6 @@ class Task(Process):
         if self.status == 'D':
             self.end_date = dt.datetime.now()
             self.logger.table(end_date=self.end_date)
-        elif self.status == 'E':
-            if self.pipeline.logging.task.fields.get('text_error'):
-                self.logger.table(text_error=self.text_error)
         logger.debug(f'{self} ended')
         return self.end()
 
@@ -2191,7 +2223,8 @@ class Step(Process, Unit):
         self._status = None
         self._records_read = 0
         self._records_written = 0
-        self._records_found = 0
+        self._records_processed = 0
+        self._records_error = 0
         self._result_value = 0
         self._result_long = 0
         self.errors = set()
@@ -2337,6 +2370,32 @@ class Step(Process, Unit):
         pass
 
     @property
+    def records_processed(self):
+        """Get number of records processed."""
+        return self._records_processed
+
+    @records_written.setter
+    def records_processed(self, value):
+        if isinstance(value, int):
+            self._records_processed += value
+            self.logger.table(records_processed=self.records_processed)
+        pass
+
+    @property
+    def records_error(self):
+        """Get number of records with error."""
+        return self._records_error
+
+    @records_error.setter
+    def records_error(self, value):
+        print('Hello there!')
+        if isinstance(value, int):
+            self._records_error += value
+            self.task.records_error = value
+            self.logger.table(records_error=self.records_error)
+        pass
+
+    @property
     def result_value(self):
         """Get short numeric result value."""
         return self._result_value
@@ -2387,15 +2446,6 @@ class Step(Process, Unit):
             return True
         else:
             return False
-
-    @property
-    def text_error(self):
-        """Get textual exception from the last registered error."""
-        if self.errors:
-            err_type, err_value, err_tb = last(self.errors)
-            return ''.join(tb.format_exception(err_type, err_value, err_tb))
-        else:
-            return None
 
     def setup(self, pipeline):
         """Configure the step for the given pipeline."""
@@ -2543,9 +2593,6 @@ class Step(Process, Unit):
         if self.status == 'D':
             self.end_date = dt.datetime.now()
             self.logger.table(end_date=self.end_date)
-        elif self.status == 'E':
-            if self.pipeline.logging.step.fields.get('text_error'):
-                self.logger.table(text_error=self.text_error)
         logger.debug(f'{self} ended')
         pass
 
