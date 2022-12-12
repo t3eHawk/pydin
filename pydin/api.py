@@ -53,27 +53,31 @@ class Driver():
                 logger.debug(f'File {dest} created')
         else:
             raise Exception(f'file {dest} already exists!')
-        config_path = os.path.join(root, 'pydin.ini')
         config_local = configparser.ConfigParser()
-        config_dict = {'SCHEDULER': {'scheduler_name': name or '',
-                                     'scheduler_desc': desc or '',
-                                     'chargers_number': '5',
-                                     'executors_number': '20',
-                                     'refresh_interval': '300',
-                                     'rerun_delay': '14400',
-                                     'rerun_interval': '3600',
-                                     'wakeup_interval': '60'
-                                     },
-                       'LOGGING': {'console': 'True',
-                                   'file': 'True',
-                                   'info': 'True',
-                                   'debug': 'False',
-                                   'error': 'True',
-                                   'warning': 'True',
-                                   'critical': 'True',
-                                   'alarming': 'False',
-                                   'maxsize': '10485760',
-                                   'maxdays': '1'}}
+        config_path = os.path.join(root, 'pydin.ini')
+        config_dict = {
+            'SCHEDULER': {
+                'scheduler_name': name or '',
+                'scheduler_desc': desc or '',
+                'chargers_number': '5',
+                'executors_number': '20',
+                'refresh_interval': '300',
+                'rerun_delay': '14400',
+                'rerun_interval': '3600',
+                'wakeup_interval': '60'
+            },
+            'LOGGING': {
+                'console': 'True',
+                'file': 'True',
+                'info': 'True',
+                'debug': 'False',
+                'error': 'True',
+                'warning': 'True',
+                'critical': 'True',
+                'alarming': 'False',
+                'maxsize': '10485760',
+                'maxdays': '1'}
+            }
         config_local.read_dict(config_dict)
         with open(config_path, 'w') as fh:
             config_local.write(fh, space_around_delimiters=False)
@@ -209,18 +213,24 @@ class Driver():
 
         config_path = os.path.join(folder, 'pydin.ini')
         config_local = configparser.ConfigParser()
-        config_dict = {'JOB': {},
-                       'LOGGING': {'console': 'True',
-                                   'file': 'True',
-                                   'info': 'True',
-                                   'debug': 'False',
-                                   'error': 'True',
-                                   'warning': 'True',
-                                   'critical': 'True',
-                                   'alarming': 'True',
-                                   'maxsize': '10485760',
-                                   'maxdays': '1'},
-                       'EMAIL': {'toggle': 'True'}}
+        config_dict = {
+            'JOB': {},
+            'LOGGING': {
+                'console': 'True',
+                'file': 'True',
+                'info': 'True',
+                'debug': 'False',
+                'error': 'True',
+                'warning': 'True',
+                'critical': 'True',
+                'alarming': 'True',
+                'maxsize': '10485760',
+                'maxdays': '1'
+            },
+            'EMAIL': {
+                'toggle': 'True'
+            }
+        }
         config_local.read_dict(config_dict)
         with open(config_path, 'w') as fh:
             config_local.write(fh, space_around_delimiters=False)
@@ -444,29 +454,41 @@ class Driver():
             raise Exception(f'file {config_path} already exists!')
         else:
             config_parser = configparser.ConfigParser()
-            config_dict = {'GENERAL': {'debug': '',
-                                       'editor': '',
-                                       'owner': ''},
-                           'DATABASE': {'vendor': '',
-                                        'driver': '',
-                                        'path': '',
-                                        'host': '',
-                                        'port': '',
-                                        'sid': '',
-                                        'service': '',
-                                        'user': '',
-                                        'password': ''},
-                           'EMAIL': {'toggle': '',
-                                     'host': '',
-                                     'port': '',
-                                     'tls': '',
-                                     'address': '',
-                                     'user': '',
-                                     'password': ''},
-                           'API': {'host': '',
-                                   'port': '',
-                                   'token': ''},
-                           'ENVIRONMENTS': {'python': sys.executable}}
+            config_dict = {
+                'GENERAL': {
+                    'debug': '',
+                    'editor': '',
+                    'owner': ''
+                },
+                'DATABASE': {
+                    'vendor': '',
+                    'driver': '',
+                    'path': '',
+                    'host': '',
+                    'port': '',
+                    'sid': '',
+                    'service': '',
+                    'user': '',
+                    'password': ''
+                },
+                'EMAIL': {
+                    'toggle': '',
+                    'host': '',
+                    'port': '',
+                    'tls': '',
+                    'address': '',
+                    'user': '',
+                    'password': ''
+                },
+                'API': {
+                    'host': '',
+                    'port': '',
+                    'token': ''
+                },
+                'ENVIRONMENTS': {
+                    'python': sys.executable
+                }
+            }
             config_parser.read_dict(config_dict)
             with open(config_path, 'w') as fh:
                 config_parser.write(fh, space_around_delimiters=False)

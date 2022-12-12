@@ -13,7 +13,7 @@ from .models import Files, FileManager
 from .vars import run_id, task_id, step_id, process_id
 
 
-__version__ = '0.1.0'
+__version__ = '0.1.1'
 __status__ = 'Development'
 
 __author__ = 'Timur Faradzhov'
