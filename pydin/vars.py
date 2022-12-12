@@ -23,16 +23,24 @@ class KeyField:
         return value
 
     @property
-    def unit(self):
-        return 'Task' if self.name.startswith(('task', 'process')) else 'Step'
-
-    @property
     def label(self):
         return f'pd_{self.name}'
 
     @property
     def column(self):
         return sa.literal(self.value).label(self.label)
+
+    def associated(self, obj):
+        """Check if the key field associated with the given instance."""
+        class_name = obj.__class__.__name__
+        if self.name.startswith(class_name.lower()):
+            return True
+        elif self.name.startswith('run') and class_name == 'Job':
+            return True
+        elif self.name.startswith('process') and class_name == 'Job':
+            return True
+        else:
+            return False
 
 
 class RunId(KeyField):
@@ -42,6 +50,12 @@ class RunId(KeyField):
     def value(self):
         if self.model.job:
             return self.model.job.record_id
+
+
+class ProcessId(RunId):
+    """Represents Process ID as a key field."""
+
+    pass
 
 
 class TaskId(KeyField):
@@ -60,15 +74,6 @@ class StepId(KeyField):
     def value(self):
         if self:
             raise NotImplementedError
-
-
-class ProcessId(KeyField):
-    """Represents Process ID as a key field."""
-
-    @property
-    def value(self):
-        if self.model.pipeline:
-            return self.model.pipeline.task.id
 
 
 run_id = ProcessId()

@@ -1274,7 +1274,7 @@ class Job():
                 key_field = getattr(variables, key_name) if key_name else None
 
                 chunk_size = record['chunk_size']
-                cleanup = True if record['cleanup'] else False
+                cleanup = to_boolean(record['cleanup'])
 
                 constructor = getattr(models, node_type)
                 node = constructor(model_name=node_name,
@@ -1788,9 +1788,9 @@ class Process():
 
     @property
     def job(self):
-        """Get process job ID."""
+        """Get process job."""
         if self.pipeline and self.pipeline.job:
-                return self.pipeline.job
+            return self.pipeline.job
 
     @property
     def process_name(self):
@@ -1816,13 +1816,13 @@ class Process():
         if exc_info:
             self.errors.add(exc_info)
             if isinstance(self, Task):
-                if self.pipeline.job:
-                    self.pipeline.job.errors.add(exc_info)
+                if self.job:
+                    self.job.errors.add(exc_info)
             if isinstance(self, Step):
                 if self.pipeline:
                     self.pipeline.task.errors.add(exc_info)
-                    if self.pipeline.job:
-                        self.pipeline.job.errors.add(exc_info)
+                    if self.job:
+                        self.job.errors.add(exc_info)
 
     pass
 
@@ -2088,11 +2088,15 @@ class Task(Process):
             th = db.tables.task_history
             for record in self.history:
                 record_id = record['id']
+                process_id = record['run_id']
                 status = record['status']
                 if status == 'D':
                     for step in self.pipeline.walk():
                         if step.last.recyclable:
-                            if step.last.key_field.unit == 'Task':
+                            if step.last.key_field.associated(self.job):
+                                if process_id:
+                                    step.last.recycle(process_id)
+                            elif step.last.key_field.associated(self):
                                 step.last.recycle(record_id)
                     update = th.update().values(status='C').\
                                 where(th.c.id == record_id)
@@ -2521,7 +2525,7 @@ class Step(Process, Unit):
                 status = record['status']
                 if status == 'D':
                     if self.last.recyclable:
-                        if self.last.key_field.unit == 'Step':
+                        if self.last.key_field.associated(self):
                             self.last.recycle(record_id)
                     update = sh.update().values(status='C').\
                                 where(sh.c.id == record_id)
