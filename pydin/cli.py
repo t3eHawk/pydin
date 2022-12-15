@@ -319,6 +319,10 @@ class Manager():
             elif key == 'date':
                 value = dt.datetime.fromisoformat(value)
             kwargs[key] = value
+        else:
+            now = dt.datetime.now()
+            timestamp = int(now.timestamp())
+            kwargs['tag'] = timestamp
         kwargs['recycle'] = True if 'recycle' in args else None
         kwargs['debug'] = True if 'debug' in args else None
         kwargs['noalarm'] = False if 'noalarm' in args else None
