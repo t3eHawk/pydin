@@ -66,7 +66,10 @@ class Database(pe.Database):
             """."""
             conn = db.connect()
             table = self.table
-            insert = table.insert()
+            columns = [c.name for c in table.columns]
+            primary_keys = [pk.name for pk in table.primary_key.columns]
+            values = {c: None for c in columns if c not in primary_keys}
+            insert = table.insert().values(**values)
             result = conn.execute(insert)
             self.id = result.inserted_primary_key[0]
             return self.id
