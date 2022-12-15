@@ -6,6 +6,7 @@ import pepperoni as pe
 import sqlalchemy as sa
 
 from .config import config
+from .utils import installed
 from .utils import to_datetime
 
 
@@ -14,21 +15,7 @@ class Database(pe.Database):
 
     def __init__(self):
         if config['DATABASE'].get('vendor'):
-            vendor = config['DATABASE']['vendor']
-            driver = config['DATABASE'].get('driver')
-            path = config['DATABASE'].get('path')
-            host = config['DATABASE'].get('host')
-            port = config['DATABASE'].get('port')
-            sid = config['DATABASE'].get('sid')
-            service = config['DATABASE'].get('service')
-            user = config['DATABASE'].get('user')
-            password = config['DATABASE'].get('password')
-            super().__init__(vendor=vendor, driver=driver,
-                             path=path, host=host, port=port,
-                             sid=sid, service=service,
-                             user=user, password=password)
-        self.tables = self.Tables(self)
-        self.null = self.Null()
+            self.configure()
         pass
 
     def __repr__(self):
@@ -125,9 +112,30 @@ class Database(pe.Database):
         """."""
         return self.Record(self, table, id=id)
 
+    def configure(self):
+        vendor = config['DATABASE']['vendor']
+        driver = config['DATABASE'].get('driver')
+        path = config['DATABASE'].get('path')
+        host = config['DATABASE'].get('host')
+        port = config['DATABASE'].get('port')
+        sid = config['DATABASE'].get('sid')
+        service = config['DATABASE'].get('service')
+        user = config['DATABASE'].get('user')
+        password = config['DATABASE'].get('password')
+        super().__init__(vendor=vendor, driver=driver,
+                         path=path, host=host, port=port,
+                         sid=sid, service=service,
+                         user=user, password=password)
+
+    def load(self):
+        """Load application database schema."""
+        self.tables = self.Tables(self)
+        self.null = self.Null()
+
     def deploy(self):
         """Deploy application database schema."""
-        raise NotImplementedError
+        print('WARNING: Automatic DB schema deployment not implemented yet. '
+              'Please deploy the schema yourself using scripts from GitHub.')
 
     def normalize(self, job_name=None, job_description=None, status=None,
                   monthday=None, weekday=None,
@@ -197,3 +205,4 @@ class Database(pe.Database):
 
 
 db = Database()
+if installed(): db.load()

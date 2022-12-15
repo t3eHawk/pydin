@@ -8,7 +8,6 @@
 
 List of available commands:
 
-create scheduler   {create_scheduler}
 start scheduler    {start_scheduler}
 stop scheduler     {stop_scheduler}
 restart scheduler  {restart_scheduler}
@@ -27,9 +26,10 @@ cancel job         {cancel_job}
 cancel jobs        {cancel_jobs}
 cancel run         {cancel_run}
 
+install            {install}
+create scheduler   {create_scheduler}
 create config      {create_config}
 edit config        {edit_config}
-
 create repo        {create_repo}
 sync repo          {sync_repo}
 

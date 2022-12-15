@@ -1,6 +1,7 @@
 """Contains application manager."""
 
 import argparse
+import getpass
 import time
 import datetime as dt
 import os
@@ -44,8 +45,10 @@ class Manager():
             self.help()
         elif len(command) == 2 and command[1] == 'help':
             self.help()
+        elif len(command) == 2 and command[1] == 'install':
+            self.install()
         elif len(command) > 2 and command[-1] == 'help':
-            name = '_'.join(command[1:3])
+            name = '_'.join(command[1:2 if len(command) == 3 else 3])
             self.help(name=name)
         elif len(command) > 2:
             # Read command. Command length is two words as maximum.
@@ -68,11 +71,13 @@ class Manager():
                         logger.error()
                 except Exception:
                     logger.error()
+        else:
+            self.unknown()
 
     def help(self, name=None):
         """Show help note for all available commands."""
         if name == 'help' or name is None:
-            funcs = ['start_console',
+            funcs = ['start_console', 'install',
                      'create_scheduler',
                      'start_scheduler', 'stop_scheduler',
                      'restart_scheduler',
@@ -125,6 +130,22 @@ class Manager():
                 self.parse(command)
         print('Good bye!')
         pass
+
+    def install(self):
+        """Install application files in current location."""
+        import pydin as pd
+
+        self._header()
+        print('Welcome!')
+        print(f'This is an installation of PyDin v.{pd.__version__}.')
+        while True:
+            sure = input('Continue? [Y/n] ')
+            if sure in ('Y', 'n'):
+                break
+        if sure == 'Y':
+            self.create_config()
+            self.create_scheduler()
+            self.configure_database()
 
     def create_scheduler(self):
         """Create scheduler in current location."""
@@ -415,9 +436,9 @@ class Manager():
         config_path = self.driver.create_config()
         if config_path is not None:
             print(f'Global config created ({config_path}).')
+            return config.load([config_path])
         else:
             print('Global config was not created.')
-        pass
 
     def edit_config(self, type=None):
         """Open chosen configuration file in text editor."""
@@ -438,6 +459,59 @@ class Manager():
         else:
             print(f'File {path} does not exists.')
         pass
+
+    def configure_database(self):
+        """Configure database connection."""
+        from .config import user_config
+        print('Configure the listed options to set up the DB schema.')
+        print('Application DB schema will be automatically deployed.')
+        vendor = input('Enter your DB vendor name: ')
+        config['DATABASE']['vendor'] = vendor
+        if vendor == 'sqlite':
+            path = os.path.abspath('pydin.sqlite3')
+            if os.path.exists(path):
+                print(f'SQLite DB file {path} already exists!')
+                return
+            else:
+                config['DATABASE']['path'] = path
+                db.configure()
+        elif vendor == 'oracle':
+            print('Note: you can skip this items '
+                  'and set them up later yourself.')
+            driver = 'cx_oracle'
+            config['DATABASE']['driver'] = driver
+            host = input('DB host address: ')
+            port = input('DB port number: ')
+            sid = input('DB SID: ')
+            service = input('DB service name: ')
+            user = input('User name: ')
+            password = getpass.getpass('User password: ')
+            for k, v in dict(host=host, port=port, sid=sid, service=service,
+                             user=user, password=password).items():
+                if v:
+                    config['DATABASE'][k] = v
+            if host and port and (sid or service) and user and password:
+                db.configure()
+            else:
+                print(f'Please configure the DB connection in {user_config}. '
+                      f'Then deploy the DB schema using scripts from GitHub.')
+                return
+        else:
+            print(f'Sorry. This DB vendor {vendor} is not supported.')
+            return
+        config.save()
+        print(f'Schema configured. Check configuration file {user_config}.')
+        while True:
+            sure = input('Continue? [Y/n] ')
+            if sure in ('Y', 'n'):
+                if sure == 'Y':
+                    db.deploy()
+                    if vendor == 'sqlite':
+                        print(f'Schema deployed in SQLite DB file {path}.')
+                    elif vendor == 'oracle':
+                        address = f'{host}/{sid or service}'
+                        print(f'Schema deployed in Oracle DB {address}.')
+                break
 
     def create_repo(self):
         """Create job repository and publish it by URL."""
@@ -548,3 +622,9 @@ class Manager():
         else:
             raise TypeError('id must be digit')
         pass
+
+    def _header(self):
+        """Print main application header."""
+        path = os.path.join(os.path.dirname(__file__), 'samples/head.txt')
+        text = open(path, 'r').read()
+        print(text)

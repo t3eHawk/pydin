@@ -54,6 +54,25 @@ def declare(object):
     return True
 
 
+def installed():
+    """Check if application is installed and configured."""
+    from .config import user_config, local_config, config
+    if not os.path.exists(user_config):
+        return False
+    elif not os.path.exists(local_config):
+        return False
+    elif not config.get('DATABASE'):
+        return False
+    elif not config['DATABASE'].get('vendor'):
+        return False
+    elif not config.get('API'):
+        return False
+    elif not config.get('ENVIRONMENTS'):
+        return False
+    else:
+        return True
+
+
 def case(value, *options):
     """Parse the given arguments into a case-logic."""
     n = len(options)

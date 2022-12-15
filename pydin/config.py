@@ -93,6 +93,18 @@ class Configurator(dict):
                     self[section][option] = value
         return self
 
+    def save(self):
+        """Save current settings to the user configuration file."""
+        config_parser = configparser.ConfigParser()
+        config_dict = {'GENERAL': self['GENERAL'],
+                       'DATABASE': self['DATABASE'],
+                       'EMAIL': self['EMAIL'],
+                       'API': self['API'],
+                       'ENVIRONMENTS': self['ENVIRONMENTS']}
+        config_parser.read_dict(config_dict)
+        with open(user_config, 'w') as fh:
+            config_parser.write(fh, space_around_delimiters=False)
+
     def has_table(self, table):
         """Check if configuration table exists."""
         if self.get(table) is not None:

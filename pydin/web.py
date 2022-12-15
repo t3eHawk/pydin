@@ -24,7 +24,6 @@ from .utils import to_process
 app = flask.Flask(__name__)
 auth = flask_httpauth.HTTPTokenAuth(scheme='Bearer')
 root = os.environ['PYDIN_HOME'] if os.environ.get('PYDIN_HOME') else locate()
-TOKEN = config['API']['token']
 
 
 OK = flask.Response(status=200)
@@ -32,7 +31,7 @@ BAD_REQUEST = flask.Response(status=400)
 SERVER_ERROR = flask.Response(status=500)
 
 
-class Interface():
+class Server():
     """Represents web API server."""
 
     def __init__(self, host=None, port=None, dev=False):
@@ -126,6 +125,7 @@ class Interface():
 @auth.verify_token
 def verify_token(token):
     """."""
+    TOKEN = config['API']['token']
     if token == TOKEN:
         return token
 

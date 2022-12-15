@@ -17,6 +17,7 @@ install_requires = ['pepperoni', 'sqlalchemy', 'cx_Oracle', 'paramiko',
                     'flask', 'flask_httpauth', 'waitress',
                     'sqlparse', 'gitpython']
 packages = setuptools.find_packages()
+package_data = {'pydin': ['demo/*', 'samples/*']}
 classifiers = ['Programming Language :: Python :: 3',
                'License :: OSI Approved :: MIT License',
                'Operating System :: OS Independent']
@@ -33,4 +34,5 @@ setuptools.setup(name=name,
                  url=url,
                  install_requires=install_requires,
                  packages=packages,
+                 package_data=package_data,
                  classifiers=classifiers)

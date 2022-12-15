@@ -11,9 +11,9 @@ import time as tm
 
 import sqlalchemy as sa
 
+from .db import db
 from .config import config
 from .logger import logger
-from .db import db
 
 from .utils import to_process, to_python
 from .utils import locate
@@ -53,7 +53,7 @@ class Driver():
                 logger.debug(f'File {dest} created')
         else:
             raise Exception(f'file {dest} already exists!')
-        config_local = configparser.ConfigParser()
+        config_parser = configparser.ConfigParser()
         config_path = os.path.join(root, 'pydin.ini')
         config_dict = {
             'SCHEDULER': {
@@ -78,13 +78,10 @@ class Driver():
                 'maxsize': '10485760',
                 'maxdays': '1'}
             }
-        config_local.read_dict(config_dict)
+        config_parser.read_dict(config_dict)
         with open(config_path, 'w') as fh:
-            config_local.write(fh, space_around_delimiters=False)
+            config_parser.write(fh, space_around_delimiters=False)
         logger.debug(f'Configuration file {config_path} saved')
-        # Not implemented yet.
-        # db.deploy()
-        # logger.debug(f'Schema deployed at {db}')
         pass
 
     def start_scheduler(self, path=None):
@@ -211,8 +208,8 @@ class Driver():
             else:
                 raise Exception(f'file {dest} already exists!')
 
+        config_parser = configparser.ConfigParser()
         config_path = os.path.join(folder, 'pydin.ini')
-        config_local = configparser.ConfigParser()
         config_dict = {
             'JOB': {},
             'LOGGING': {
@@ -231,9 +228,9 @@ class Driver():
                 'toggle': 'True'
             }
         }
-        config_local.read_dict(config_dict)
+        config_parser.read_dict(config_dict)
         with open(config_path, 'w') as fh:
-            config_local.write(fh, space_around_delimiters=False)
+            config_parser.write(fh, space_around_delimiters=False)
         logger.debug(f'Configuration file {config_path} saved')
 
         path = os.path.join(root, 'jobs/.git')
@@ -448,10 +445,9 @@ class Driver():
     def create_config(self):
         """Create global config."""
         logger.debug('Creating global config...')
-        from .config import user as path
-        config_path = os.path.abspath(path)
-        if os.path.exists(config_path) is True:
-            raise Exception(f'file {config_path} already exists!')
+        from .config import user_config
+        if os.path.exists(user_config) is True:
+            raise Exception(f'file {user_config} already exists!')
         else:
             config_parser = configparser.ConfigParser()
             config_dict = {
@@ -490,10 +486,10 @@ class Driver():
                 }
             }
             config_parser.read_dict(config_dict)
-            with open(config_path, 'w') as fh:
+            with open(user_config, 'w') as fh:
                 config_parser.write(fh, space_around_delimiters=False)
-            logger.debug(f'Global config {config_path} created')
-            return config_path
+            logger.debug(f'Global config {user_config} created')
+            return user_config
 
     def create_repo(self, url=None):
         """Create git repository."""
