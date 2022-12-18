@@ -19,6 +19,7 @@ from .logger import logger
 
 from .utils import locate
 from .utils import to_process
+from .utils import to_boolean
 
 
 app = flask.Flask(__name__)
@@ -64,42 +65,54 @@ class Server():
                 self.stop()
         pass
 
+    @property
+    def url(self):
+        """Get server url."""
+        return f'http://{self.host}:{self.port}'
+
     def start(self):
         """Start API server."""
-        self.status = True
-        self.start_date = dt.datetime.now()
-        app = 'pydin.web:app'
-        env = os.environ.copy()
-        env['PYDIN_HOME'] = locate()
-        if self.dev is True:
-            script = ['flask', 'run']
-            args = ['--host', self.host, '--port', str(self.port)]
-            cmd = [arg for arg in [*script, *args] if arg is not None]
-            mode = 'development'
-            env['FLASK_APP'] = app
-            env['FLASK_ENV'] = mode
-            try:
-                proc = sp.Popen(cmd, env=env)
-                proc.wait()
-            except KeyboardInterrupt:
-                proc.terminate()
-        else:
-            script = 'waitress-serve'
-            args = ['--host', self.host, '--port', str(self.port), app]
-            args = [arg for arg in args if arg is not None]
-            proc = to_process(script, args=args, env=env, devnull=True)
-
-            conn = db.connect()
-            table = db.tables.components
-            update = table.update().where(table.c.id == 'RESTAPI')
+        conn = db.connect()
+        table = db.tables.components
+        select = table.select()
+        result = conn.execute(select).first()
+        status = to_boolean(result.status)
+        if not status:
+            self.status = True
+            self.start_date = dt.datetime.now()
+            app = 'pydin.web:app'
+            env = os.environ.copy()
+            env['PYDIN_HOME'] = locate()
+            if self.dev is True:
+                script = ['flask', 'run']
+                args = ['--host', self.host, '--port', str(self.port)]
+                cmd = [arg for arg in [*script, *args] if arg is not None]
+                mode = 'development'
+                env['FLASK_APP'] = app
+                env['FLASK_ENV'] = mode
+                try:
+                    proc = sp.Popen(cmd, env=env)
+                    proc.wait()
+                except KeyboardInterrupt:
+                    proc.terminate()
+            else:
+                script = 'waitress-serve'
+                args = ['--host', self.host, '--port', str(self.port), app]
+                args = [arg for arg in args if arg is not None]
+                proc = to_process(script, args=args, env=env, devnull=True)
             pid = proc.pid
-            update = update.values(status='Y', pid=pid,
+            debug = 'X' if self.dev else None
+            update = table.update().where(table.c.id == 'RESTAPI')
+            update = update.values(status='Y', pid=pid, url=self.url,
                                    start_date=self.start_date,
                                    stop_date=self.stop_date,
                                    server_name=self.server_name,
-                                   user_name=self.user_name)
+                                   user_name=self.user_name,
+                                   debug=debug)
             conn.execute(update)
-        pass
+        else:
+            pid = result.pid
+            print(f'Server already working on PID[{pid}]')
 
     def stop(self):
         """Stop API server."""
@@ -108,17 +121,17 @@ class Server():
         conn = db.connect()
         table = db.tables.components
         select = table.select().where(table.c.id == 'RESTAPI')
-        update = table.update().where(table.c.id == 'RESTAPI')
         result = conn.execute(select).first()
-        status = True if result.status == 'Y' else False
+        status = to_boolean(result.status)
         pid = result.pid
-        if status is True and pid is not None:
+        if status and pid:
             try:
                 os.kill(pid, signal.SIGTERM)
-            except (OSError, ProcessLookupError):
-                pass
-            update = update.values(status='N', stop_date=self.stop_date)
-            conn.execute(update)
+            except Exception as error:
+                print(f'Server on PID[{pid}] stopped with error: {error}')
+        update = table.update().where(table.c.id == 'RESTAPI')
+        update = update.values(status='N', stop_date=self.stop_date)
+        conn.execute(update)
         pass
 
 

@@ -2,7 +2,6 @@
 
 import argparse
 import atexit
-import ctypes
 import datetime as dt
 import importlib as imp
 import importlib.util as impu
@@ -30,12 +29,13 @@ from .config import calendar
 from .logger import logger
 
 from .utils import locate
-from .utils import cache, declare
+from .utils import declare, cache, terminator
 from .utils import case, coalesce
 from .utils import first, last
 from .utils import to_boolean
 from .utils import to_datetime, to_timestamp
 from .utils import to_thread, to_process, to_python
+from .const import LINUX, MACOS, WINDOWS
 
 from .config import Logging
 from .config import Localhost, Server, Database
@@ -81,21 +81,21 @@ class Scheduler():
         logger.configure(format='{isodate}\t{thread}\t{rectype}\t{message}\n',
                          alarming=False)
 
+        args = self._parse_arguments()
         argv = [arg for arg in sys.argv if arg.startswith('-') is False]
         if len(argv) > 1:
             arg = argv[1]
             if arg == 'start':
-                file = os.path.abspath(sys.argv[0])
-                to_python(file, '--start')
+                path = os.path.abspath(sys.argv[0])
+                to_python(path, '--start')
             elif arg == 'stop':
-                logger.configure(file=False)
+                logger.configure(file=False, debug=args.debug)
                 self.stop()
         else:
-            args = self._parse_arguments()
             if args.start is True:
                 self.start()
             elif args.stop is True:
-                logger.configure(file=False)
+                logger.configure(file=False, debug=args.debug)
                 self.stop()
         pass
 
@@ -328,9 +328,12 @@ class Scheduler():
 
         def was_sleeping(self, timestamp):
             """Check if the sleep window was active at a timestamp."""
-            time_unit = self.scheduler.parser(timestamp).hour
-            if self.scheduler.matcher(self.sleep_period, time_unit):
-                return True
+            if self.sleep_period:
+                time_unit = self.scheduler.parser(timestamp).hour
+                if self.scheduler.matcher(self.sleep_period, time_unit):
+                    return True
+                else:
+                    return False
             else:
                 return False
 
@@ -352,7 +355,7 @@ class Scheduler():
                     else:
                         limit = 1
                 if isinstance(limit, int):
-                    if self.scheduler.count_running(self.id) > limit:
+                    if self.scheduler.count_running(self.id) >= limit:
                         return True
                     else:
                         return False
@@ -433,7 +436,6 @@ class Scheduler():
     def stop(self):
         """Stop the scheduler."""
         self._terminate()
-        pass
 
     def restart(self):
         """Restart the scheduler."""
@@ -621,14 +623,25 @@ class Scheduler():
         self._stop()
         logger.info(f'Scheduler on PID[{self.pid}] stopped')
         self._exit()
-        pass
 
     def _stop(self):
         # Perform all necessary actions before scheduler stop.
         self.status = False
         self.stop_date = dt.datetime.now()
         self._update_component()
-        pass
+
+    def _exit(self):
+        # Terminate the processes of the scheduler and its running jobs.
+        if WINDOWS:
+            for pid in self.procs:
+                try:
+                    logger.debug(f'Terminating Job on PID[{pid}]')
+                    terminator(pid)
+                except (OSError, ProcessLookupError):
+                    logger.warning(f'Job on PID[{pid}] not found')
+                except Exception:
+                    logger.error()
+        sys.exit()
 
     def _terminate(self):
         # Kill running scheduler.
@@ -637,28 +650,19 @@ class Scheduler():
         table = db.tables.components
         select = table.select().where(table.c.id == 'SCHEDULER')
         result = conn.execute(select).first()
+        status = to_boolean(result.status)
         pid = result.pid
         logger.debug(f'Scheduler should be on PID[{pid}]')
         try:
-            if os.name != 'nt':
-                os.kill(pid, signal.SIGTERM)
-            else:
-                kernel = ctypes.windll.kernel32
-                logger.debug(f'Scheduler on PID[{pid}] must be terminated')
-                kernel.FreeConsole()
-                kernel.AttachConsole(pid)
-                kernel.SetConsoleCtrlHandler(False, True)
-                kernel.GenerateConsoleCtrlEvent(True, False)
+            terminator(pid)
         except (OSError, ProcessLookupError):
-            logger.debug(f'Scheduler on PID[{pid}] already terminated')
+            logger.warning(f'Scheduler on PID[{pid}] not found')
+            if status:
+                self._stop()
+        except Exception:
+            logger.error()
         else:
             logger.debug(f'Scheduler on PID[{pid}] successfully terminated')
-        pass
-
-    def _exit(self):
-        # Abort this running scheduler execution.
-        logger.debug('Execution will be aborted now')
-        sys.exit()
         pass
 
     def _active(self):
@@ -898,7 +902,6 @@ class Scheduler():
             tm.sleep(1)
 
     def _execute(self, job: Job, tag: int):
-        # Execute job.
         try:
             env = job.env or 'python'
             args = job.args or ''
@@ -906,14 +909,13 @@ class Scheduler():
             record_id = job.record_id
             logger.info(f'Initiating {job}...')
             exe = config['ENVIRONMENTS'].get(env)
-            file = os.path.join(self.path, f'jobs/{job.id}/job.py')
+            path = os.path.join(self.path, f'jobs/{job.id}/job.py')
             args += f' run -a --record {record_id}'
-            proc = to_process(exe, file, args)
+            proc = to_process(exe, path, args)
             logger.info(f'{job} runs on PID {proc.pid}')
             logger.debug(f'Waiting for {job} to finish...')
             self.procs[proc.pid] = proc
             proc.wait(timeout)
-            self.procs.pop(proc.pid)
         except sp.TimeoutExpired:
             logger.warning(f'{job} timeout exceeded')
             try:
@@ -929,6 +931,7 @@ class Scheduler():
         except Exception:
             logger.error()
         else:
+            self.procs.pop(proc.pid)
             if proc.returncode > 0:
                 logger.info(F'{job} completed with error')
                 try:
@@ -979,6 +982,8 @@ class Scheduler():
                             required=False, help='start new scheduler')
         parser.add_argument('--stop', action='store_true',
                             required=False, help='stop running scheduler')
+        parser.add_argument('--debug', action='store_true',
+                            required=False, help='enable debug mode')
         args, anons = parser.parse_known_args()
         return args
 
@@ -1026,7 +1031,7 @@ class Scheduler():
 
     def _update_component(self):
         # Update component information in database table.
-        logger.debug('Updating this component information...')
+        logger.debug('Updating component information...')
         conn = db.connect()
         table = db.tables.components
         update = table.update().where(table.c.id == 'SCHEDULER')
@@ -1255,7 +1260,7 @@ class Job():
         if self.configured:
             nodes = []
             models = imp.import_module('pydin.models')
-            variables = imp.import_module('pydin.vars')
+            fields = imp.import_module('pydin.fields')
             for record in self.configuration:
                 source_name = record['source_name']
                 node_name = record['node_name']
@@ -1271,7 +1276,7 @@ class Job():
                 value_field = record['value_field']
 
                 key_name = record['key_field']
-                key_field = getattr(variables, key_name) if key_name else None
+                key_field = getattr(fields, key_name) if key_name else None
 
                 chunk_size = record['chunk_size']
                 cleanup = to_boolean(record['cleanup'])
@@ -1507,10 +1512,8 @@ class Job():
         if self.initiator_id:
             self.initiator.write(rerun_times=self.seqno, rerun_now=None)
         logger.info(f'{self} canceled')
-        pass
 
-    def __cancel(self, signum=None, frame=None):
-        # Cancel this running job.
+    def _shutdown(self, signum=None, frame=None):
         self._cancel()
         return sys.exit()
 
@@ -1578,9 +1581,9 @@ class Job():
     def _set_signals(self):
         # Configure signal triggers.
         logger.debug('Setting signal triggers...')
-        signal.signal(signal.SIGINT, self.__cancel)
+        signal.signal(signal.SIGINT, self._shutdown)
         logger.debug(f'SIGINT trigger set for current PID[{self.pid}]')
-        signal.signal(signal.SIGTERM, self.__cancel)
+        signal.signal(signal.SIGTERM, self._shutdown)
         logger.debug(f'SIGTERM trigger set for current PID[{self.pid}]')
         pass
 
@@ -1616,9 +1619,9 @@ class Job():
                         args = row.arguments or ''
 
                         exe = config['ENVIRONMENTS'].get(env)
-                        file = os.path.abspath(f'{self.path}/../{id}/job.py')
+                        path = os.path.abspath(f'{self.path}/../{id}/job.py')
                         args += f' run -a --tag {tag} --trigger {trigger_id}'
-                        proc = to_process(exe, file, args=args)
+                        proc = to_process(exe, path, args)
                         logger.info(f'{repr} runs on PID {proc.pid}')
                     except Exception:
                         logger.error()

@@ -20,7 +20,7 @@ create table pd_schedule (
   environment     varchar2(50 char),
   arguments       varchar2(100 char),
   timeout         number(*, 0),
-  parallelism     varchar2(50 char) default 'N',
+  parallelism     varchar2(2 char) default 'N',
   rerun_limit     number(*, 0),
   rerun_days      number(*, 0),
   sleep_period    varchar2(100 char),

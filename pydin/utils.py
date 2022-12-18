@@ -1,8 +1,9 @@
 """Utilits."""
 
-
 import os
 import sys
+import signal
+import ctypes
 
 import re
 import datetime as dt
@@ -12,6 +13,8 @@ import subprocess as sp
 import importlib as imp
 
 import sqlparse
+
+from .const import LINUX, MACOS, WINDOWS
 
 
 def locate():
@@ -25,6 +28,14 @@ def locate():
     root = os.path.abspath(os.path.dirname(sys.argv[0]))
     os.chdir(root)
     return root
+
+
+def declare(object):
+    """."""
+    namespace = imp.import_module('pydin')
+    name = object.__class__.__name__.lower()
+    setattr(namespace, name, object)
+    return True
 
 
 def cache(object):
@@ -46,20 +57,22 @@ def cache(object):
     return True
 
 
-def declare(object):
-    """."""
-    namespace = imp.import_module('pydin')
-    name = object.__class__.__name__.lower()
-    setattr(namespace, name, object)
-    return True
+def terminator(pid):
+    """Terminate process at a given PID correctly."""
+    if LINUX or MACOS:
+        os.kill(pid, signal.SIGTERM)
+    elif WINDOWS:
+        kernel = ctypes.windll.kernel32
+        kernel.FreeConsole()
+        kernel.AttachConsole(pid)
+        kernel.SetConsoleCtrlHandler(None, 1)
+        kernel.GenerateConsoleCtrlEvent(0, 0)
 
 
 def installed():
     """Check if application is installed and configured."""
-    from .config import user_config, local_config, config
+    from .config import user_config, config
     if not os.path.exists(user_config):
-        return False
-    elif not os.path.exists(local_config):
         return False
     elif not config.get('DATABASE'):
         return False
@@ -148,6 +161,12 @@ def to_boolean(value):
         return None
 
 
+def to_none(value):
+    """."""
+    if not isinstance(value, bool):
+        return None
+
+
 def to_timestamp(value):
     """Convert initial value to timestamp.
 
@@ -197,26 +216,25 @@ def to_datetime(value):
     pass
 
 
-def to_process(exe, file=None, args=None, env=None, devnull=False, spawn=True):
+def to_process(exe, path=None, args=None, env=None, devnull=False, spawn=True):
     """Run the command in a separate process."""
-    # logger.debug(f'Making process from {exe=}, {file=}, {args=}')
     command = []
     if re.match(r'^.*(\\|/).*$', exe) is not None:
         exe = os.path.abspath(exe)
     command.append(exe)
-    if file is not None:
-        file = os.path.abspath(file)
-        command.append(file)
-    if args is not None:
-        if isinstance(args, str) is True:
+    if path:
+        path = os.path.abspath(path)
+        command.append(path)
+    if args:
+        if isinstance(args, str):
             args = args.split()
         command.extend(args)
-    # logger.debug(f'{command=}')
     kwargs = {}
     kwargs['env'] = env
-    kwargs['stdout'] = sp.DEVNULL if devnull is True else sp.PIPE
-    kwargs['stderr'] = sp.DEVNULL if devnull is True else sp.PIPE
-    if os.name == 'nt' and spawn is True:
+    kwargs['stdin'] = sp.DEVNULL if devnull else sp.PIPE
+    kwargs['stdout'] = sp.DEVNULL if devnull else sp.PIPE
+    kwargs['stderr'] = sp.DEVNULL if devnull else sp.PIPE
+    if WINDOWS and spawn:
         kwargs['creationflags'] = sp.CREATE_NO_WINDOW
     proc = sp.Popen(command, **kwargs)
     return proc
@@ -228,10 +246,10 @@ def to_thread(name, function):
     return thread
 
 
-def to_python(file, args=None):
+def to_python(path, args=None):
     """Run the Python script in a separate process."""
     python = sys.executable
-    proc = to_process(python, file, args, devnull=True, spawn=True)
+    proc = to_process(python, path, args, devnull=True, spawn=True)
     return proc
 
 

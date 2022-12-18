@@ -1,11 +1,9 @@
 """Contains Python API including prototypes and built-in models."""
 
 import configparser
-import ctypes
 import git
 import os
 import shutil
-import signal
 import sys
 import time as tm
 
@@ -15,8 +13,9 @@ from .db import db
 from .config import config
 from .logger import logger
 
-from .utils import to_process, to_python
 from .utils import locate
+from .utils import terminator
+from .utils import to_process, to_python
 from .wrap import check_repo
 
 
@@ -88,9 +87,9 @@ class Driver():
         """Start scheduler."""
         logger.debug('Starting scheduler...')
         root = self.root if path is None else os.path.abspath(path)
-        file = os.path.join(root, 'scheduler.py')
-        if os.path.exists(file) is True:
-            proc = to_python(file, '--start')
+        path = os.path.join(root, 'scheduler.py')
+        if os.path.exists(path) is True:
+            proc = to_python(path, '--start')
             result = proc.poll()
             running = True if result is None else False
             if result is None:
@@ -110,20 +109,20 @@ class Driver():
                 return None
         else:
             logger.debug('Scheduler cannot be started')
-            raise Exception(f'file {file} does not exist')
+            raise Exception(f'file {path} does not exist')
         pass
 
     def stop_scheduler(self, path=None):
         """Stop scheduler."""
         logger.debug('Stopping scheduler...')
-        root = self.root if path is None else os.path.abspath(path)
-        file = os.path.join(root, 'scheduler.py')
-        if os.path.exists(file) is True:
-            to_python(file, 'stop')
+        path = self.root if path is None else os.path.abspath(path)
+        path = os.path.join(path, 'scheduler.py')
+        if os.path.exists(path) is True:
+            to_python(path, 'stop')
             logger.debug('Scheduler stopped')
         else:
             logger.debug('Scheduler cannot be stopped')
-            raise Exception(f'file {file} does not exist')
+            raise Exception(f'file {path} does not exist')
         pass
 
     def restart_scheduler(self, path=None):
@@ -155,11 +154,13 @@ class Driver():
                 return result.pid
         pass
 
-    def create_job(self, name=None, desc=None, mday=None, wday=None,
-                   hour=None, min=None, sec=None, tgid=None,
-                   start_date=None, end_date=None, env=None, args=None,
-                   timeout=None, rerun_limit=None, rerun_days=None,
-                   alarm=None, email_list=None, debug=None, norepo=False):
+    def create_job(self, name=None, desc=None, mday=None,
+                   hour=None, min=None, sec=None, wday=None, yday=None,
+                   trig=None, start_date=None, end_date=None,
+                   env=None, args=None, timeout=None, parallelism=None,
+                   rerun_limit=None, rerun_days=None,
+                   sleep_period=None, alarm=None, email_list=None,
+                   debug=None, norepo=False):
         """Create job with all necessary elements."""
         logger.debug('Creating job...')
         conn = db.connect()
@@ -167,16 +168,20 @@ class Driver():
         values = db.normalize(job_name=name,
                               job_description=desc,
                               status=False,
-                              monthday=mday, weekday=wday,
+                              monthday=mday,
                               hour=hour, minute=min, second=sec,
-                              trigger_id=tgid,
+                              weekday=wday,
+                              yearday=yday,
+                              trigger_id=trig,
                               start_date=start_date,
                               end_date=end_date,
                               environment=env,
                               arguments=args,
                               timeout=timeout,
+                              parallelism=parallelism,
                               rerun_limit=rerun_limit,
                               rerun_days=rerun_days,
+                              sleep_period=sleep_period,
                               alarm=alarm,
                               email_list=email_list,
                               debug=debug)
@@ -225,7 +230,7 @@ class Driver():
                 'maxdays': '1'
             },
             'EMAIL': {
-                'toggle': 'True'
+                'toggle': 'False'
             }
         }
         config_parser.read_dict(config_dict)
@@ -240,11 +245,13 @@ class Driver():
         logger.debug(f'{repr} successfully created and scheduled')
         return id
 
-    def configure_job(self, id, name=None, desc=None, mday=None, wday=None,
-                      hour=None, min=None, sec=None, tgid=None,
-                      start_date=None, end_date=None, env=None, args=None,
-                      timeout=None, rerun_limit=None, rerun_days=None,
-                      alarm=None, email_list=None, debug=None):
+    def configure_job(self, id, name=None, desc=None, mday=None,
+                      hour=None, min=None, sec=None, wday=None, yday=None,
+                      trig=None, start_date=None, end_date=None,
+                      env=None, args=None, timeout=None, parallelism=None,
+                      rerun_limit=None, rerun_days=None,
+                      sleep_period=None, alarm=None, email_list=None,
+                      debug=None):
         """Modify job configuration."""
         repr = f'Job[{id}]'
         logger.debug(f'Editing {repr}...')
@@ -252,16 +259,20 @@ class Driver():
         table = db.tables.schedule
         values = db.normalize(job_name=name,
                               job_description=desc,
-                              monthday=mday, weekday=wday,
+                              monthday=mday,
                               hour=hour, minute=min, second=sec,
-                              trigger_id=tgid,
+                              weekday=wday,
+                              yearday=yday,
+                              trigger_id=trig,
                               start_date=start_date,
                               end_date=end_date,
                               environment=env,
                               arguments=args,
                               timeout=timeout,
+                              parallelism=parallelism,
                               rerun_limit=rerun_limit,
                               rerun_days=rerun_days,
+                              sleep_period=sleep_period,
                               alarm=alarm,
                               email_list=email_list,
                               debug=debug)
@@ -331,7 +342,7 @@ class Driver():
         table = db.tables.schedule
         select = table.select()
         if id is not None:
-            select = select.where(table.c.id == id)
+            select = select.where(table.c.id == id).orderby(table.c.id)
         result = conn.execute(select).fetchall()
         for row in result:
             yield dict(row)
@@ -350,7 +361,7 @@ class Driver():
         env = result.environment or 'python'
         args = result.arguments or ''
         exe = config['ENVIRONMENTS'].get(env)
-        file = os.path.join(self.root, f'jobs/{id}/job.py')
+        path = os.path.join(self.root, f'jobs/{id}/job.py')
         args += ' run'
         args_dict = {'tag': tag,
                      'date': date.isoformat() if date is not None else None,
@@ -363,8 +374,8 @@ class Driver():
         for key, value in args_dict.items():
             if value is not None:
                 args += f' --{key} {value}'
-        logger.debug(f'{exe=}, {file=}, {args=}')
-        proc = to_process(exe, file, args=args)
+        logger.debug(f'{exe=}, {path=}, {args=}')
+        proc = to_process(exe, path, args)
         logger.debug(f'{repr} runs on PID {proc.pid}')
         if wait is True:
             logger.debug(f'Waiting for {repr} to finish...')
@@ -380,7 +391,7 @@ class Driver():
         repr = f'Job[{id}]'
         logger.debug(f'Requested to cancel {repr} runs...')
         conn = db.connect()
-        table = db.tables.history
+        table = db.tables.run_history
         select = (table.select().
                   where(sa.and_(table.c.job_id == id,
                                 table.c.status == 'R')))
@@ -396,7 +407,7 @@ class Driver():
         """Cancel all jobs."""
         logger.debug(f'Requested to cancel all jobs...')
         conn = db.connect()
-        table = db.tables.history
+        table = db.tables.run_history
         select = table.select().where(table.c.status == 'R')
         result = conn.execute(select).fetchall()
         for row in result:
@@ -412,29 +423,22 @@ class Driver():
         repr = f'Run[{id}]'
         logger.debug(f'Requested to cancel {repr}...')
         conn = db.connect()
-        table = db.tables.history
+        table = db.tables.run_history
         select = table.select().where(table.c.id == id)
         result = conn.execute(select).first()
         if result.status == 'R':
             pid = result.pid
             try:
-                if os.name != 'nt':
-                    os.kill(pid, signal.SIGTERM)
-                else:
-                    kernel = ctypes.windll.kernel32
-                    logger.debug(f'{repr} on PID[{pid}] must be terminated')
-                    kernel.FreeConsole()
-                    kernel.AttachConsole(pid)
-                    kernel.SetConsoleCtrlHandler(False, True)
-                    kernel.GenerateConsoleCtrlEvent(True, False)
-            except (OSError, ProcessLookupError, TypeError):
-                logger.debug(f'{repr} on PID[{pid}] already terminated')
-                update = (table.update().
-                          values(status='C').
+                terminator(pid)
+            except (OSError, ProcessLookupError):
+                logger.warning(f'{repr} on PID[{pid}] not found')
+                update = (table.update().values(status='C').
                           where(sa.and_(table.c.id == id,
                                         table.c.status == 'R')))
                 conn.execute(update)
                 logger.debug(f'{repr} status changed to C')
+            except Exception:
+                logger.error()
             else:
                 logger.debug(f'{repr} on PID[{pid}] successfully terminated')
             logger.debug(f'{repr} canceled')

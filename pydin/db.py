@@ -4,6 +4,7 @@ import datetime as dt
 
 import pepperoni as pe
 import sqlalchemy as sa
+import cx_Oracle as oracle
 
 from .config import config
 from .utils import installed
@@ -16,6 +17,7 @@ class Database(pe.Database):
     def __init__(self):
         if config['DATABASE'].get('vendor'):
             self.configure()
+        self.null = self.Null()
         pass
 
     def __repr__(self):
@@ -125,6 +127,9 @@ class Database(pe.Database):
         service = config['DATABASE'].get('service')
         user = config['DATABASE'].get('user')
         password = config['DATABASE'].get('password')
+        client = config['DATABASE'].get('client')
+        if client and vendor == 'oracle':
+            oracle.init_oracle_client(lib_dir=client)
         super().__init__(vendor=vendor, driver=driver,
                          path=path, host=host, port=port,
                          sid=sid, service=service,
@@ -133,7 +138,6 @@ class Database(pe.Database):
     def load(self):
         """Load application database schema."""
         self.tables = self.Tables(self)
-        self.null = self.Null()
 
     def deploy(self):
         """Deploy application database schema."""
@@ -141,12 +145,14 @@ class Database(pe.Database):
               'Please deploy the schema yourself using scripts from GitHub.')
 
     def normalize(self, job_name=None, job_description=None, status=None,
-                  monthday=None, weekday=None,
-                  hour=None, minute=None, second=None, trigger_id=None,
+                  monthday=None, hour=None, minute=None, second=None,
+                  weekday=None, yearday=None, trigger_id=None,
                   start_date=None, end_date=None,
-                  environment=None, arguments=None, timeout=None,
+                  environment=None, arguments=None,
+                  timeout=None, parallelism=None,
                   rerun_limit=None, rerun_days=None,
-                  alarm=None, email_list=None, debug=None):
+                  sleep_period=None, alarm=None,
+                  email_list=None, debug=None):
         """Normalize parameters in accordance with their data types."""
         values = {}
         setup = [{'column': 'job_name', 'value': job_name,
@@ -158,13 +164,15 @@ class Database(pe.Database):
                   'norm_func': lambda arg: 'Y' if arg is True else 'N'},
                  {'column': 'monthday', 'value': monthday,
                   'types': (int, str)},
-                 {'column': 'weekday', 'value': weekday,
-                  'types': (int, str)},
                  {'column': 'hour', 'value': hour,
                   'types': (int, str)},
                  {'column': 'minute', 'value': minute,
                   'types': (int, str)},
                  {'column': 'second', 'value': second,
+                  'types': (int, str)},
+                 {'column': 'weekday', 'value': weekday,
+                  'types': (int, str)},
+                 {'column': 'yearday', 'value': yearday,
                   'types': (int, str)},
                  {'column': 'trigger_id', 'value': trigger_id,
                   'types': (int,)},
@@ -178,10 +186,14 @@ class Database(pe.Database):
                   'types': (str,)},
                  {'column': 'timeout', 'value': timeout,
                   'types': (int,)},
+                 {'column': 'parallelism', 'value': parallelism,
+                  'types': (int, str)},
                  {'column': 'rerun_limit', 'value': rerun_limit,
                   'types': (int,)},
                  {'column': 'rerun_days', 'value': rerun_days,
                   'types': (int,)},
+                 {'column': 'sleep_period', 'value': sleep_period,
+                  'types': (int, str)},
                  {'column': 'alarm', 'value': alarm,
                   'types': (bool,),
                   'norm_func': lambda arg: 'Y' if arg is True else self.null},
@@ -196,13 +208,10 @@ class Database(pe.Database):
             value = item['value']
             types = item['types']
             norm_func = item.get('norm_func')
-            if isinstance(value, (*types, self.Null)) is True:
-                if (
-                    isinstance(value, self.Null) is True
-                    or callable(norm_func) is False
-                ):
+            if isinstance(value, types) or value is self.null:
+                if value is self.null or not callable(norm_func):
                     values[column] = value
-                elif callable(norm_func) is True:
+                elif callable(norm_func):
                     values[column] = norm_func(value)
         return values
 

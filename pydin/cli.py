@@ -15,6 +15,7 @@ from .db import db
 from .config import config
 from .logger import logger
 from .utils import locate
+from .utils import to_none
 
 
 class Manager():
@@ -42,7 +43,7 @@ class Manager():
     def parse(self, command):
         """Parse and execute command."""
         if len(command) == 1:
-            self.help()
+            self.start_console()
         elif len(command) == 2 and command[1] == 'help':
             self.help()
         elif len(command) == 2 and command[1] == 'install':
@@ -145,7 +146,7 @@ class Manager():
         if sure == 'Y':
             self.create_config()
             self.create_scheduler()
-            self.configure_database()
+            self._configure_database()
 
     def create_scheduler(self):
         """Create scheduler in current location."""
@@ -464,7 +465,55 @@ class Manager():
             print(f'File {path} does not exists.')
         pass
 
-    def configure_database(self):
+    def create_repo(self):
+        """Create job repository and publish it by URL."""
+        url = input('Please give remote Git repository URL: ')
+        if self.sure is False:
+            while True:
+                sure = input(f'Are you sure? [Y/n] ')
+                if sure in ('Y', 'n'):
+                    sure = True if sure == 'Y' else False
+                    break
+        if sure is True:
+            self.driver.create_repo(url=url)
+            print('Job repository successfully created.')
+        pass
+
+    def sync_repo(self, id=None):
+        """Synchronize job repository."""
+        print('You are trying to synchronize job repository...')
+        sure = self.sure
+        if sure is False:
+            while True:
+                sure = input(f'Are you sure? [Y/n] ')
+                if sure in ('Y', 'n'):
+                    sure = True if sure == 'Y' else False
+                    break
+        if sure is True:
+            self.driver.pull_repo()
+            kwargs = {}
+            if id is not None:
+                kwargs['id'] = int(id)
+            self.driver.push_repo(**kwargs)
+            print('Job repository successfully synchronized.')
+        pass
+
+    def _parse_arguments(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument('-y', '--yes', dest='sure', action='store_true',
+                            required=False, help='do not ask to confirm')
+        parser.add_argument('-w', '--wait', dest='wait', action='store_true',
+                            required=False, help='wait for job to finish')
+        parser.add_argument('-o', '--output', dest='output',
+                            action='store_true', required=False,
+                            help='show process stdout')
+        parser.add_argument('-e', '--error', dest='error',
+                            action='store_true', required=False,
+                            help='show process stderr')
+        args, anons = parser.parse_known_args()
+        return args
+
+    def _configure_database(self):
         """Configure database connection."""
         from .config import user_config
         print('Configure the listed options to set up the DB schema.')
@@ -517,84 +566,66 @@ class Manager():
                         print(f'Schema deployed in Oracle DB {address}.')
                 break
 
-    def create_repo(self):
-        """Create job repository and publish it by URL."""
-        url = input('Please give remote Git repository URL: ')
-        if self.sure is False:
-            while True:
-                sure = input(f'Are you sure? [Y/n] ')
-                if sure in ('Y', 'n'):
-                    sure = True if sure == 'Y' else False
-                    break
-        if sure is True:
-            self.driver.create_repo(url=url)
-            print('Job repository successfully created.')
-        pass
-
-    def sync_repo(self, id=None):
-        """Synchronize job repository."""
-        print('You are trying to synchronize job repository...')
-        sure = self.sure
-        if sure is False:
-            while True:
-                sure = input(f'Are you sure? [Y/n] ')
-                if sure in ('Y', 'n'):
-                    sure = True if sure == 'Y' else False
-                    break
-        if sure is True:
-            self.driver.pull_repo()
-            kwargs = {}
-            if id is not None:
-                kwargs['id'] = int(id)
-            self.driver.push_repo(**kwargs)
-            print('Job repository successfully synchronized.')
-        pass
-
-    def _parse_arguments(self):
-        parser = argparse.ArgumentParser()
-        parser.add_argument('-y', '--yes', dest='sure', action='store_true',
-                            required=False, help='do not ask to confirm')
-        parser.add_argument('-w', '--wait', dest='wait', action='store_true',
-                            required=False, help='wait for job to finish')
-        parser.add_argument('-o', '--output', dest='output',
-                            action='store_true', required=False,
-                            help='show process stdout')
-        parser.add_argument('-e', '--error', dest='error',
-                            action='store_true', required=False,
-                            help='show process stderr')
-        args, anons = parser.parse_known_args()
-        return args
-
     def _configure_job(self):
         name = input('Name this job:\n') or None
         desc = input('Describe shortly this job:\n') or None
         env = input('Enter the environment or leave empty to use default: ')
         env = env or None
+
         print()
         print('Schedule this job:')
-        mday = input('Month day [1-31] == ') or None
-        wday = input('Week day [1-7] ==== ') or None
-        hour = input('Hour [0-23] ======= ') or None
-        min = input('Minute [0-59] ===== ') or None
-        sec = input('Second [0-59] ===== ') or None
-        tgid = input('Triggering JID [1...n] === ')
-        tgid = int(tgid) if tgid.isdigit() else None
-        tgid = db.null if tgid == 0 else tgid
+        mday = input('Month day [1-31] ==== ') or None
+        hour = input('Hour [0-23] ========= ') or None
+        min = input('Minute [0-59] ======= ') or None
+        sec = input('Second [0-59] ======= ') or None
+        wday = input('Week day [1-7] ====== ') or None
+        yday = input('Year day [1-366] ==== ') or None
+        trig = input('Parent Job ID [1...n] ') or None
+        if isinstance(trig, str):
+            if trig.isdigit() or trig == '-':
+                trig = int(trig) if trig.isdigit() else trig
+                trig = db.null if trig == '-' else trig
+            else:
+                trig = to_none(trig)
+
         print()
         start_date = input('Start date [YYYY-MM-DD HH24:MI:SS] ') or None
-        start_date = db.null if start_date == '-' else None
+        start_date = db.null if start_date is None else None
         end_date = input('End date [YYYY-MM-DD HH24:MI:SS] ') or None
-        end_date = db.null if end_date == '-' else None
+        end_date = db.null if end_date is None else None
+
         print()
         timeout = input('Set timeout [1...n] ')
         timeout = int(timeout) if timeout.isdigit() else None
-        timeout = db.null if timeout == 0 else timeout
-        rerun_limit = input('Limit of reruns number [1...n] ')
-        rerun_limit = int(rerun_limit) if rerun_limit.isdigit() else None
-        rerun_limit = db.null if rerun_limit == 0 else rerun_limit
-        rerun_days = input('Limit of days in maintenance [1...n] ')
-        rerun_days = int(rerun_days) if rerun_days.isdigit() else None
-        rerun_days = db.null if rerun_days == 0 else rerun_days
+        timeout = db.null if timeout is None else timeout
+        parallelism = input('Set parallelism degree [1...n] ') or None
+        if isinstance(parallelism, str):
+            if parallelism.isdigit() or parallelism == 'N':
+                parallelism = 'N' if parallelism == '1' else parallelism
+            else:
+                parallelism = to_none(parallelism)
+        rerun_limit = input('Limit of reruns number [1...n] ') or None
+        if isinstance(rerun_limit, str):
+            if rerun_limit.isdigit() or rerun_limit == '-':
+                if rerun_limit.isdigit() and rerun_days != '0':
+                    rerun_limit = int(rerun_limit)
+                else:
+                    rerun_limit = db.null
+            else:
+                rerun_limit = to_none(rerun_limit)
+        rerun_days = input('Limit of days for reruns [1...n] ') or None
+        if isinstance(rerun_days, str):
+            if rerun_days.isdigit() or rerun_days == '-':
+                if rerun_days.isdigit():
+                    rerun_days = int(rerun_days)
+                else:
+                    rerun_days = db.null
+            else:
+                rerun_days = to_none(rerun_days)
+        sleep_period = input('Hours of sleep window [0-23] ') or None
+        if isinstance(sleep_period, str):
+            sleep_period = db.null if sleep_period == '-' else sleep_period
+
         print()
         alarm = input('Enable alarming for this job [Y] ')
         alarm = True if alarm == 'Y' else None
@@ -605,18 +636,22 @@ class Manager():
                   'desc': desc,
                   'env': env,
                   'mday': mday,
-                  'wday': wday,
                   'hour': hour,
                   'min': min,
                   'sec': sec,
-                  'tgid': tgid,
+                  'wday': wday,
+                  'yday': yday,
+                  'trig': trig,
                   'start_date': start_date,
                   'end_date': end_date,
                   'timeout': timeout,
+                  'parallelism': parallelism,
                   'rerun_limit': rerun_limit,
                   'rerun_days': rerun_days,
+                  'sleep_period': sleep_period,
                   'alarm': alarm,
                   'email_list': email_list}
+
         print()
         return result
 
@@ -625,7 +660,6 @@ class Manager():
             return int(id)
         else:
             raise TypeError('id must be digit')
-        pass
 
     def _header(self):
         """Print main application header."""
