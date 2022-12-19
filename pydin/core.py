@@ -377,7 +377,6 @@ class Scheduler():
             """Check if this job is ready to awake."""
             if (
                 not self.is_sleeping()
-                and not self.scheduler.count_running(self.id)
                 and not self.is_busy()
             ):
                 return True
