@@ -502,7 +502,7 @@ class Scheduler():
         """Get the list of all scheduled jobs."""
         conn = db.connect()
         table = db.tables.schedule
-        select = table.select().orderby(table.c.id)
+        select = table.select().order_by(table.c.id)
         result = conn.execute(select).fetchall()
         for record in result:
             job = self.Job(record.id, self).from_schedule(record)
@@ -525,7 +525,7 @@ class Scheduler():
                                 h.c.rerun_id.is_(None),
                                 h.c.rerun_now.is_(None),
                                 h.c.rerun_done.is_(None))).
-                  orderby(h.c.id))
+                  order_by(h.c.id))
         conn = db.connect()
         result = conn.execute(select).fetchall()
         for record in result:
@@ -547,7 +547,7 @@ class Scheduler():
                              h.c.rerun_times, s.c.rerun_limit, s.c.rerun_days]).
                   select_from(sa.join(h, s, h.c.job_id == s.c.id)).
                   where(h.c.status == 'W').
-                  orderby(h.c.id))
+                  order_by(h.c.id))
         conn = db.connect()
         result = conn.execute(select).fetchall()
         for record in result:

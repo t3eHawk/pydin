@@ -342,7 +342,8 @@ class Driver():
         table = db.tables.schedule
         select = table.select()
         if id is not None:
-            select = select.where(table.c.id == id).orderby(table.c.id)
+            select = select.where(table.c.id == id)
+        select = select.order_by(table.c.id)
         result = conn.execute(select).fetchall()
         for row in result:
             yield dict(row)
