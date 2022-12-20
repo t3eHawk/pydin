@@ -112,13 +112,13 @@ class Model(Node):
     def date_from(self):
         """The beggining of the target date of this model."""
         if hasattr(self, 'date_field'):
-            return self.target_date.start
+            return self.converter(self.target_date.start)
 
     @property
     def date_to(self):
         """The end of the target date of this model."""
         if hasattr(self, 'date_field'):
-            return self.target_date.end
+            return self.converter(self.target_date.end)
 
     @property
     def value_field(self):
@@ -209,6 +209,13 @@ class Model(Node):
                 return self._format_custom_query(value)
             else:
                 return value
+
+    def converter(self, value):
+        """Convert the given value into the appropriate model format."""
+        if value and hasattr(self, '_convert'):
+            return self._convert(value)
+        else:
+            return value
 
     def explain(self, parameter_name=None):
         """Get model or chosen parameter description."""
@@ -1064,6 +1071,17 @@ class Insert(Executable, Model):
                           error_code=error_code,
                           error_text=error_text)
         pass
+
+    def _convert(self, value):
+        if isinstance(value, dt.datetime):
+            if self.db.vendor == 'oracle':
+                string = f'{value:%Y-%m-%d %H:%M:%S}'
+                fmt = 'yyyy-mm-dd hh24:mi:ss'
+                return sa.func.to_date(string, fmt)
+            else:
+                return value
+        else:
+            return value
 
     def _format(self, text):
         text = text.format(task=self.task)
