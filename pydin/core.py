@@ -35,6 +35,7 @@ from .utils import first, last
 from .utils import to_boolean
 from .utils import to_datetime, to_timestamp
 from .utils import to_thread, to_process, to_python
+from .utils import to_lower, to_upper
 from .const import LINUX, MACOS, WINDOWS
 
 from .config import Logging
@@ -1276,7 +1277,7 @@ class Job():
                 timezone = record['timezone']
                 value_field = record['value_field']
 
-                key_name = record['key_field']
+                key_name = to_lower(record['key_field'])
                 key_field = getattr(fields, key_name) if key_name else None
 
                 chunk_size = record['chunk_size']

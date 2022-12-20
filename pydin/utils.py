@@ -253,6 +253,22 @@ def to_python(path, args=None):
     return proc
 
 
+def to_lower(value):
+    """Get the string in lowercase."""
+    if isinstance(value, str):
+        return value.lower()
+    else:
+        return value
+
+
+def to_upper(value):
+    """Get the string in uppercase."""
+    if isinstance(value, str):
+        return value.upper()
+    else:
+        return value
+
+
 def to_sql(text):
     """Format given SQL text."""
     result = sqlparse.format(text, keyword_case='upper',
