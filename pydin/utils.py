@@ -12,7 +12,8 @@ import threading as th
 import subprocess as sp
 import importlib as imp
 
-import sqlparse
+import sqlalchemy as sa
+import sqlparse as spa
 
 from .const import LINUX, MACOS, WINDOWS
 
@@ -271,9 +272,9 @@ def to_upper(value):
 
 def to_sql(text):
     """Format given SQL text."""
-    result = sqlparse.format(text, keyword_case='upper',
-                             identifier_case='lower',
-                             reindent_aligned=True)
+    result = spa.format(text, keyword_case='upper',
+                        identifier_case='lower',
+                        reindent_aligned=True)
     return result
 
 
@@ -299,5 +300,103 @@ def read_file_or_string(value):
     """Read content from file or string."""
     if os.path.isfile(value):
         return open(value, 'r').read()
+    else:
+        return value
+
+
+def sql_formatter(query, expand_select=None, expand_where=None,
+                  make_subquery=False):
+    """Modify the given SQL query."""
+    import sqlparse.sql as s
+    import sqlparse.tokens as t
+
+    def is_select(token):
+        if isinstance(token, s.IdentifierList):
+            return True
+        return False
+
+    def is_where(token):
+        if isinstance(token, s.Where):
+            return True
+        return False
+
+    def has_where(statement):
+        for token in statement:
+            if is_where(token):
+                return True
+        return False
+
+    def get_length(statement):
+        if statement.tokens:
+            return len(statement.tokens)
+        return 0
+
+    parsed = spa.parse(query)
+    statement = parsed[0] if parsed else None
+
+    ws = s.Token(t.Whitespace, ' ')
+    nl = s.Token(t.Newline, '\n')
+    cm = s.Token(t.Punctuation, ',')
+    where = s.Token(t.Keyword, 'where')
+    and_ = s.Token(t.Operator, 'and')
+
+    if expand_select:
+        expansion = s.Token(t.Other, expand_select)
+        for token in statement.tokens:
+            if is_select(token):
+                tokens = s.TokenList([cm, expansion])
+                last_position = get_length(token)
+                token.insert_after(last_position, tokens)
+
+    if expand_where:
+        expansion = s.Token(t.Other, expand_where)
+        if has_where(statement):
+            tokens = s.TokenList([expansion, nl, and_, ws])
+            for token in statement.tokens:
+                if is_where(token):
+                    token.insert_after(1, tokens)
+        else:
+            tokens = s.TokenList([where, ws, expansion, nl])
+            last_position = get_length(statement)
+            statement.insert_after(last_position, tokens)
+
+    if make_subquery:
+        statement = f'select * from ({statement})'
+
+    text = str(statement)
+    result = spa.format(text, keyword_case='upper', identifier_case='lower',
+                        reindent_aligned=True)
+    return str(result)
+
+
+def sql_compiler(obj, db):
+    """Compile the given SQL query."""
+    import sqlalchemy.dialects as dialects
+    try:
+        database = getattr(dialects, db.vendor)
+        if database:
+            dialect = database.dialect()
+            result = obj.compile(dialect=dialect, compile_kwargs=db.ckwargs)
+            return str(result)
+        else:
+            raise NotImplementedError
+    except Exception:
+        result = obj.compile(compile_kwargs=db.ckwargs)
+        return str(result)
+
+
+def sql_converter(value, db):
+    """Convert the given SQL value."""
+    if isinstance(value, int):
+        return value
+    elif isinstance(value, str):
+        return f'\'{value}\''
+    elif isinstance(value, dt.datetime):
+        if db.vendor == 'oracle':
+            string = f'{value:%Y-%m-%d %H:%M:%S}'
+            fmt = 'YYYY-MM-DD HH24:MI:SS'
+            return f'to_date(\'{string}\', \'{fmt}\')'
+        elif db.vendor == 'sqlite':
+            return f'\'{value:%Y-%m-%d %H:%M:%S}\''
     else:
         return value

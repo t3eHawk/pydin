@@ -25,6 +25,7 @@ from .logger import logger
 from .utils import to_sql
 from .utils import coalesce
 from .utils import read_file_or_string
+from .utils import sql_formatter, sql_compiler, sql_converter
 
 from .core import Node
 
@@ -112,13 +113,13 @@ class Model(Node):
     def date_from(self):
         """The beggining of the target date of this model."""
         if hasattr(self, 'date_field'):
-            return self.converter(self.target_date.start)
+            return self.target_date.start
 
     @property
     def date_to(self):
         """The end of the target date of this model."""
         if hasattr(self, 'date_field'):
-            return self.converter(self.target_date.end)
+            return self.target_date.end
 
     @property
     def value_field(self):
@@ -209,13 +210,6 @@ class Model(Node):
                 return self._format_custom_query(value)
             else:
                 return value
-
-    def converter(self, value):
-        """Convert the given value into the appropriate model format."""
-        if value and hasattr(self, '_convert'):
-            return self._convert(value)
-        else:
-            return value
 
     def explain(self, parameter_name=None):
         """Get model or chosen parameter description."""
@@ -986,26 +980,30 @@ class Insert(Executable, Model):
         table = self.get_table()
         insert = table.insert()
 
+        select = self.select
         columns = [sa.column(column) for column in self.describe()]
-        select = sa.text(self.select).columns(*columns).alias('s')
 
         if self.key_field:
             columns = [*columns, self.key_field.column]
-        select = sa.select(columns).select_from(select)
+            expression = f'{self.key_field.value} as {self.key_field.label}'
+            select = sql_formatter(select, expand_select=expression)
 
         if self.date_field:
-            date_column = sa.column(self.date_field)
-            between = sa.between(date_column, self.date_from, self.date_to)
-            select = select.where(between)
+            date_from = sql_converter(self.date_from, self.db)
+            date_to = sql_converter(self.date_to, self.db)
+            between = f'{self.date_field} between {date_from} and {date_to}'
+            select = sql_formatter(select, expand_where=between)
 
         if self.value_field:
             last_value = self.get_last_value()
-            value_column = sa.column(self.value_field)
-            select = select.where(value_column > last_value)
+            if last_value:
+                comparison = f'{self.value_field} > {last_value}'
+                select = sql_formatter(select, make_subquery=True)
+                select = sql_formatter(select, expand_where=comparison)
 
+        select = sa.text(f'\n{select}').columns(*columns)
         query = insert.from_select(columns, select)
-        query = query.compile(compile_kwargs=self.db.ckwargs)
-        query = str(query)
+        query = sql_compiler(query, self.db)
         return query
 
     def parse(self):
@@ -1071,17 +1069,6 @@ class Insert(Executable, Model):
                           error_code=error_code,
                           error_text=error_text)
         pass
-
-    def _convert(self, value):
-        if isinstance(value, dt.datetime):
-            if self.db.vendor == 'oracle':
-                string = f'{value:%Y-%m-%d %H:%M:%S}'
-                fmt = 'yyyy-mm-dd hh24:mi:ss'
-                return sa.func.to_date(string, fmt)
-            else:
-                return value
-        else:
-            return value
 
     def _format(self, text):
         text = text.format(task=self.task)
