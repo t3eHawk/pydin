@@ -1,5 +1,6 @@
 """Contains main application database schema and objects."""
 
+import os
 import datetime as dt
 
 import pepperoni as pe
@@ -41,7 +42,8 @@ class Database(pe.Database):
             self.step_history = self.load('pd_step_history')
             self.sql_log = self.load('pd_sql_log')
             self.file_log = self.load('pd_file_log')
-            self.job_config = self.load('pd_job_config')
+            self.config = self.load('pd_config')
+            self.pipelines = self.load('pd_pipelines')
             pass
 
         def load(self, table_name=None):
@@ -141,6 +143,9 @@ class Database(pe.Database):
 
     def deploy(self):
         """Deploy application database schema."""
+        if self.vendor == 'sqlite':
+            if not os.path.exists(self.path):
+                open(self.path, 'w')
         print('WARNING: Automatic DB schema deployment not implemented yet. '
               'Please deploy the schema yourself using scripts from GitHub.')
 

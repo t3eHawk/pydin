@@ -31,6 +31,20 @@ create table pd_schedule (
   updated         text
 );
 
+create trigger pd_schedule_after_insert
+  after insert on pd_schedule
+begin
+  update pd_schedule set created = datetime('now', 'localtime')
+   where id = new.id;
+end;
+
+create trigger pd_schedule_after_update
+  after update on pd_schedule
+begin
+  update pd_schedule set updated = datetime('now', 'localtime')
+   where id = new.id;
+end;
+
 create table pd_run_history (
   id          integer primary key autoincrement,
   job_id      integer,
@@ -156,8 +170,21 @@ insert into pd_components (id) values ('SCHEDULER');
 insert into pd_components (id) values ('RESTAPI');
 commit;
 
-create table pd_job_config (
+create table pd_pipelines (
+  job_id        integer not null,
+  pipeline_id   integer primary key autoincrement,
+  pipeline_name text,
+  pipeline_desc text,
+  error_limit   integer default 1,
+  sql_logging   text default 'Y',
+  file_logging  text default 'Y',
+  unique(job_id)
+);
+
+create table pd_config (
   job_id       integer not null,
+  pipeline_id  integer,
+  node_id      integer primary key autoincrement,
   node_seqno   integer not null,
   node_name    text,
   node_desc    text,
@@ -173,5 +200,6 @@ create table pd_job_config (
   value_field  text,
   key_field    text,
   chunk_size   integer default 1000,
-  cleanup      text
+  cleanup      text,
+  unique(job_id, node_seqno)
 );

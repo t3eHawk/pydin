@@ -63,7 +63,6 @@ class Configurator(dict):
                 return True
             else:
                 return False
-            pass
 
         pass
 

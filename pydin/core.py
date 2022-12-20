@@ -502,7 +502,7 @@ class Scheduler():
         """Get the list of all scheduled jobs."""
         conn = db.connect()
         table = db.tables.schedule
-        select = table.select()
+        select = table.select().orderby(table.c.id)
         result = conn.execute(select).fetchall()
         for record in result:
             job = self.Job(record.id, self).from_schedule(record)
@@ -524,7 +524,8 @@ class Scheduler():
                   where(sa.and_(h.c.status.in_(['E', 'T']),
                                 h.c.rerun_id.is_(None),
                                 h.c.rerun_now.is_(None),
-                                h.c.rerun_done.is_(None))))
+                                h.c.rerun_done.is_(None))).
+                  orderby(h.c.id))
         conn = db.connect()
         result = conn.execute(select).fetchall()
         for record in result:
@@ -545,7 +546,8 @@ class Scheduler():
                              s.c.timeout, s.c.parallelism, s.c.sleep_period,
                              h.c.rerun_times, s.c.rerun_limit, s.c.rerun_days]).
                   select_from(sa.join(h, s, h.c.job_id == s.c.id)).
-                  where(h.c.status == 'W'))
+                  where(h.c.status == 'W').
+                  orderby(h.c.id))
         conn = db.connect()
         result = conn.execute(select).fetchall()
         for record in result:
@@ -1295,25 +1297,40 @@ class Job():
                                    cleanup=cleanup,
                                    **node_config)
                 nodes.append(node)
-            return Pipeline(*nodes)
+            settings = self.settings
+            name = settings['pipeline_name']
+            error_limit = settings['error_limit']
+            sql_logging = to_boolean(settings['sql_logging'])
+            file_logging = to_boolean(settings['file_logging'])
+            logging = Logging(sql=sql_logging, file=file_logging)
+            return Pipeline(*nodes, name=name, error_limit=error_limit,
+                            logging=logging)
+
+    @property
+    def settings(self):
+        """Get job pipeline settings."""
+        conn = db.connect()
+        p = db.tables.pipelines
+        select = p.select().where(p.c.job_id == self.id)
+        result = conn.execute(select).first()
+        if result:
+            return dict(result)
+
+    @property
+    def configuration(self):
+        """Get job pipeline configuration."""
+        conn = db.connect()
+        c = db.tables.config
+        select = c.select().where(c.c.job_id == self.id).\
+                            order_by(c.c.node_seqno)
+        result = conn.execute(select)
+        if result:
+            return [dict(record) for record in result]
 
     @property
     def configured(self):
         """Check if job configured."""
         return True if self.configuration else False
-
-    @property
-    def configuration(self):
-        """Get job configuration."""
-        conn = db.connect()
-        jc = db.tables.job_config
-        select = jc.select().where(jc.c.job_id == self.id).\
-                             order_by(jc.c.node_seqno)
-        result = conn.execute(select)
-        if result:
-            return [dict(record) for record in result]
-        else:
-            return None
 
     @classmethod
     def get(cls):
@@ -1651,7 +1668,7 @@ class Pipeline():
         self.job = Job.get() if Job.exists() else None
         if self.job:
             logger.debug(f'Using {self.job} configuration in {self}...')
-            if self.job.name:
+            if self.job.name and not name:
                 self.name = self.job.name
             if self.job.date:
                 self.date = self.job.date
@@ -2131,7 +2148,7 @@ class Task(Process):
         pass
 
     def _start(self):
-        logger.info(f'Starting {self}...')
+        logger.info(f'Starting {self} of {self.pipeline}...')
         self.start_date = dt.datetime.now()
         self.status = 'S'
         self.id = self.logger.root.table.primary_key
@@ -2534,7 +2551,7 @@ class Step(Process, Unit):
                     conn.execute(update)
 
     def _start(self):
-        logger.info(f'Starting {self}...')
+        logger.info(f'Starting {self} of {self.pipeline}...')
         self.start_date = dt.datetime.now()
         self.status = 'S'
         self.id = self.logger.root.table.primary_key
