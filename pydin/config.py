@@ -629,7 +629,7 @@ class Connector(dict):
                 password = options.get('password')
                 host = options.get('host')
                 port = options.get('port')
-
+                path = None
                 if is_path(database):
                     path = os.path.abspath(database)
                     database = None
@@ -650,7 +650,7 @@ class Connector(dict):
                 protocol = options.get('protocol').lower()
                 host = options.get('host')
                 port = options.get('port')
-                username = options.get('user')
+                username = options.get('username')
                 password = options.get('password')
                 key = options.get('key')
                 keyfile = options.get('keyfile')
@@ -1094,7 +1094,7 @@ DATABASE_HOST = None
 DATABASE_PORT = None
 DATABASE_SID = None
 DATABASE_SERVICE = None
-DATABASE_USER = None
+DATABASE_USERNAME = None
 DATABASE_PASSWORD = None
 
 EMAIL_TOGGLE = False
@@ -1102,7 +1102,7 @@ EMAIL_HOST = None
 EMAIL_PORT = None
 EMAIL_TLS = False
 EMAIL_ADDRESS = None
-EMAIL_USER = None
+EMAIL_USERNAME = None
 EMAIL_PASSWORD = None
 
 API_HOST = None

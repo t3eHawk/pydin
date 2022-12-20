@@ -127,7 +127,7 @@ class Database(pe.Database):
         port = config['DATABASE'].get('port')
         sid = config['DATABASE'].get('sid')
         service = config['DATABASE'].get('service')
-        user = config['DATABASE'].get('user')
+        username = config['DATABASE'].get('username')
         password = config['DATABASE'].get('password')
         client = config['DATABASE'].get('client')
         if client and vendor == 'oracle':
@@ -135,7 +135,7 @@ class Database(pe.Database):
         super().__init__(vendor=vendor, driver=driver,
                          path=path, host=host, port=port,
                          sid=sid, service=service,
-                         user=user, password=password)
+                         user=username, password=password)
 
     def load(self):
         """Load application database schema."""

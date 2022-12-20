@@ -13,6 +13,7 @@ from .api import Driver
 
 from .db import db
 from .config import config
+from .config import connector
 from .logger import logger
 from .utils import locate
 from .utils import to_none
@@ -147,6 +148,7 @@ class Manager():
             self.create_config()
             self.create_scheduler()
             self._configure_database()
+            self._expand_configs()
 
     def create_scheduler(self):
         """Create scheduler in current location."""
@@ -537,13 +539,13 @@ class Manager():
             port = input('DB port number: ')
             sid = input('DB SID: ')
             service = input('DB service name: ')
-            user = input('User name: ')
+            username = input('User name: ')
             password = getpass.getpass('User password: ')
             for k, v in dict(host=host, port=port, sid=sid, service=service,
-                             user=user, password=password).items():
+                             username=username, password=password).items():
                 if v:
                     config['DATABASE'][k] = v
-            if host and port and (sid or service) and user and password:
+            if host and port and (sid or service) and username and password:
                 db.configure()
             else:
                 print(f'Please configure the DB connection in {user_config}. '
@@ -654,6 +656,10 @@ class Manager():
 
         print()
         return result
+
+    def _expand_configs(self):
+        if not os.path.exists(connector.config):
+            open(connector.config, 'w')
 
     def _check_id(self, id):
         if id.isdigit() is True:

@@ -264,8 +264,7 @@ create table pd_pipelines (
   pipeline_desc varchar2(200 char),
   error_limit   number(*, 0) default 1,
   sql_logging   varchar2(1 char) default 'Y',
-  file_logging  varchar2(1 char) default 'Y',
-  unique(job_id)
+  file_logging  varchar2(1 char) default 'Y'
 );
 
 create sequence pd_pipelines_seq
@@ -280,9 +279,6 @@ begin
   select pd_pipelines_seq.nextval into :new.pipeline_id from dual;
 end;
 /
-
-create unique index pd_pipelines_job_ix
-on pd_pipelines (job_id);
 
 create table pd_config (
   job_id       number(*, 0) not null,
@@ -318,6 +314,3 @@ begin
   select pd_config_seq.nextval into :new.node_id from dual;
 end;
 /
-
-create unique index pd_config_job_ix
-on pd_config (job_id, node_seqno);

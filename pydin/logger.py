@@ -22,6 +22,6 @@ logger = pe.logger('pydin.core.logger',
                          'port': config['EMAIL'].get('port'),
                          'tls': config['EMAIL'].get('tls'),
                          'address': config['EMAIL'].get('address'),
-                         'user': config['EMAIL'].get('user'),
+                         'user': config['EMAIL'].get('username'),
                          'password': config['EMAIL'].get('password'),
                          'recipients': config['GENERAL'].get('owner')})

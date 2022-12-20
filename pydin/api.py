@@ -464,12 +464,13 @@ class Driver():
                 'DATABASE': {
                     'vendor': '',
                     'driver': '',
+                    'client': '',
                     'path': '',
                     'host': '',
                     'port': '',
                     'sid': '',
                     'service': '',
-                    'user': '',
+                    'username': '',
                     'password': ''
                 },
                 'EMAIL': {
@@ -478,7 +479,7 @@ class Driver():
                     'port': '',
                     'tls': '',
                     'address': '',
-                    'user': '',
+                    'username': '',
                     'password': ''
                 },
                 'API': {
