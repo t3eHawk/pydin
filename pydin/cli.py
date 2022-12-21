@@ -312,12 +312,12 @@ class Manager():
         id = self._check_id(id)
         repr = f'Job[{id}]'
         ln = len(args)
-        keys = ('tag', 'date', 'record_id', 'trigger_id')
+        keys = ('tag', 'date', 'process', 'trigger')
         key = args[0] if ln > 1 and args[0] in keys else None
         value = args[1] if ln > 1 and key is not None else None
         kwargs = {}
         if key is not None and value is not None:
-            if key in ('tag', 'record_id', 'trigger_id'):
+            if key in ('tag', 'process', 'trigger'):
                 value = int(value)
             elif key == 'date':
                 value = dt.datetime.fromisoformat(value)
@@ -337,9 +337,9 @@ class Manager():
             print(f'You are trying to start {repr} using timestamp {value}...')
         elif key == 'date':
             print(f'You are trying to start {repr} using date {value}...')
-        elif key == 'record_id':
+        elif key == 'process':
             print(f'You are trying to start {repr} as Run[{value}]...')
-        elif key == 'trigger_id':
+        elif key == 'trigger':
             print(f'You are trying to trig {repr} from Run[{value}]...')
         sure = self.sure
         if sure is False:

@@ -13,6 +13,8 @@ import subprocess as sp
 import importlib as imp
 
 import sqlalchemy as sa
+import sqlalchemy.dialects as sad
+
 import sqlparse as spa
 
 from .const import LINUX, MACOS, WINDOWS
@@ -369,11 +371,23 @@ def sql_formatter(query, expand_select=None, expand_where=None,
     return str(result)
 
 
+def sql_preparer(obj, db):
+    """Prepare the given object for compilation."""
+    if isinstance(obj, dt.datetime):
+        if db.vendor == 'oracle':
+            string = f'{obj:%Y-%m-%d %H:%M:%S}'
+            fmt = 'YYYY-MM-DD HH24:MI:SS'
+            return sa.func.to_date(string, fmt)
+        elif db.vendor == 'sqlite':
+            return f'{obj:%Y-%m-%d %H:%M:%S}'
+    else:
+        return obj
+
+
 def sql_compiler(obj, db):
-    """Compile the given SQL query."""
-    import sqlalchemy.dialects as dialects
+    """Compile the given object into SQL expression."""
     try:
-        database = getattr(dialects, db.vendor)
+        database = getattr(sad, db.vendor)
         if database:
             dialect = database.dialect()
             result = obj.compile(dialect=dialect, compile_kwargs=db.ckwargs)
@@ -386,7 +400,7 @@ def sql_compiler(obj, db):
 
 
 def sql_converter(value, db):
-    """Convert the given SQL value."""
+    """Convert the given value into SQL expression."""
     if isinstance(value, int):
         return value
     elif isinstance(value, str):

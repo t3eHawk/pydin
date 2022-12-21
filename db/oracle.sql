@@ -80,6 +80,7 @@ create table pd_run_history (
   rerun_times number(*, 0),
   rerun_now   varchar2(1 char),
   rerun_done  varchar2(1 char),
+  recycle_ind varchar2(1 char),
   trigger_id  number(*, 0),
   data_dump   blob,
   file_log    varchar2(25 char),

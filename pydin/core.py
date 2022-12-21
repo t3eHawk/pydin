@@ -34,8 +34,9 @@ from .utils import case, coalesce
 from .utils import first, last
 from .utils import to_boolean
 from .utils import to_datetime, to_timestamp
-from .utils import to_thread, to_process, to_python
 from .utils import to_lower, to_upper
+from .utils import to_thread, to_process, to_python
+from .utils import sql_preparer
 from .const import LINUX, MACOS, WINDOWS
 
 from .config import Logging
@@ -1107,6 +1108,8 @@ class Job():
             self.data = types.SimpleNamespace()
         self.errors = set()
 
+        self.recycle_ind = 'Y' if self.args.recycle else None
+
         self.trigger_id = args.trigger or trigger_id
         self.trigger = db.record(history, self.trigger_id)
 
@@ -1428,12 +1431,13 @@ class Job():
                           added=self.start_date,
                           start_date=self.start_date,
                           status=self.status,
-                          trigger_id=self.trigger_id,
-                          rerun_id=self.initiator_id,
-                          rerun_seqno=self.seqno,
                           server_name=self.server_name,
                           user_name=self.user_name,
                           pid=self.pid,
+                          rerun_id=self.initiator_id,
+                          rerun_seqno=self.seqno,
+                          recycle_ind=self.recycle_ind,
+                          trigger_id=self.trigger_id,
                           file_log=self.file_log)
         pass
 
@@ -1463,12 +1467,13 @@ class Job():
                           added=self.start_date,
                           start_date=self.start_date,
                           status=self.status,
-                          trigger_id=self.trigger_id,
-                          rerun_id=self.initiator_id,
-                          rerun_seqno=self.seqno,
                           server_name=self.server_name,
                           user_name=self.user_name,
                           pid=self.pid,
+                          rerun_id=self.initiator_id,
+                          rerun_seqno=self.seqno,
+                          recycle_ind=self.recycle_ind,
+                          trigger_id=self.trigger_id,
                           file_log=self.file_log)
         self.initiator.write(rerun_now='Y')
         pass
@@ -1564,9 +1569,9 @@ class Job():
         parser.add_argument('--date', type=dt.datetime.fromisoformat,
                             required=False, help='run date')
         parser.add_argument('--record', type=int,
-                            required=False, help='run ID')
+                            required=False, help='run process ID')
         parser.add_argument('--trigger', type=int,
-                            required=False, help='trigger ID')
+                            required=False, help='trigger process ID')
         parser.add_argument('--recycle', action='store_true',
                             required=False, help='recycle this job')
         parser.add_argument('--solo', action='store_true',
@@ -1683,7 +1688,10 @@ class Pipeline():
 
     def __repr__(self):
         """Represent pipeline with its name."""
-        return self.name
+        if self.job:
+            return self.__class__.__name__
+        else:
+            return f'Pipeline[{self.name}]'
 
     @property
     def name(self):
@@ -1994,7 +2002,7 @@ class Task(Process):
                 sa.and_(
                     th.c.job_id == self.job.id,
                     th.c.task_name == self.name,
-                    th.c.task_date == str(self.pipeline.date)
+                    th.c.task_date == sql_preparer(self.pipeline.date, db)
                 )
             )
             result = conn.execute(select)
@@ -2098,7 +2106,10 @@ class Task(Process):
 
     def recycle(self):
         """Recycle task."""
+        logger.info(f'{self.pipeline} configured as a recycle run')
+        logger.debug(f'{self} recycling...')
         self.revoke()
+        logger.debug(f'{self} recycled...')
         return self.run()
 
     def revoke(self):
@@ -2116,11 +2127,17 @@ class Task(Process):
                             if step.last.key_field.associated(self.job):
                                 if process_id:
                                     step.last.recycle(process_id)
+                                logger.debug(f'{step.last} recycled '
+                                             f'by {process_id=}')
                             elif step.last.key_field.associated(self):
-                                step.last.recycle(record_id)
+                                task_id = process_id
+                                step.last.recycle(task_id)
+                                logger.debug(f'{step.last} recycled '
+                                             f'by {task_id=}')
                     update = th.update().values(status='C').\
                                 where(th.c.id == record_id)
                     conn.execute(update)
+                    logger.debug(f'{self} recycled by {record_id=}')
 
     def prepare(self):
         """Make all necessary task preparations."""
@@ -2149,7 +2166,7 @@ class Task(Process):
         pass
 
     def _start(self):
-        logger.info(f'Starting {self} of {self.pipeline}...')
+        logger.info(f'Starting {self} from {self.pipeline}...')
         self.start_date = dt.datetime.now()
         self.status = 'S'
         self.id = self.logger.root.table.primary_key
@@ -2357,7 +2374,7 @@ class Step(Process, Unit):
                 sa.and_(
                     sh.c.job_id == self.job.id,
                     sh.c.step_name == self.name,
-                    sh.c.step_date == str(self.pipeline.date),
+                    sh.c.step_date == sql_preparer(self.pipeline.date, db),
                     sh.c.step_a == (self.a.name if self.a else None),
                     sh.c.step_b == (self.b.name if self.b else None),
                     sh.c.step_c == (self.c.name if self.c else None)
@@ -2528,9 +2545,9 @@ class Step(Process, Unit):
     def recycle(self):
         """Recycle this step."""
         try:
-            logger.info(f'{self} recycling...')
+            logger.debug(f'{self} recycling...')
             self.revoke()
-            logger.info(f'{self} recycled')
+            logger.debug(f'{self} recycled')
             return self.run()
         except Exception:
             logger.error()
@@ -2546,13 +2563,17 @@ class Step(Process, Unit):
                 if status == 'D':
                     if self.last.recyclable:
                         if self.last.key_field.associated(self):
-                            self.last.recycle(record_id)
+                            step_id = record_id
+                            self.last.recycle(step_id)
+                            logger.debug(f'{self.last} recycled '
+                                         f'by {step_id=}')
                     update = sh.update().values(status='C').\
                                 where(sh.c.id == record_id)
                     conn.execute(update)
+                    logger.debug(f'{self} recycled by {record_id=}')
 
     def _start(self):
-        logger.info(f'Starting {self} of {self.pipeline}...')
+        logger.info(f'Starting {self} from {self.pipeline}...')
         self.start_date = dt.datetime.now()
         self.status = 'S'
         self.id = self.logger.root.table.primary_key

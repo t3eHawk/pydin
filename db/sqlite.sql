@@ -64,6 +64,7 @@ create table pd_run_history (
   rerun_times integer,
   rerun_now   text,
   rerun_done  text,
+  recycle_ind text,
   trigger_id  integer,
   data_dump   blob,
   file_log    text,

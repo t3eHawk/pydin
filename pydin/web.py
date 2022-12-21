@@ -234,20 +234,17 @@ def run_job():
     request = flask.request
     id = request.args.get('id')
     if id is not None and id.isdigit() is True:
-        run = request.args.get('run')
+        process = request.args.get('process')
         date = request.args.get('date')
+        recycle = json.loads(request.args.get('recycle', 'false'))
         wait = json.loads(request.args.get('wait', 'false'))
         kwargs = {}
-        if run is not None or date is not None:
-            if run is not None:
-                key = 'run'
-                value = int(run)
-            elif date is not None:
-                key = 'date'
-                value = dt.datetime.fromisoformat(date)
-            kwargs[key] = value
+        if process or date:
+            k = 'process' if process else 'date'
+            v = int(process) if process else dt.datetime.fromisoformat(date)
+            kwargs[k] = v
         driver = Driver(root=root)
-        proc = driver.run_job(id, wait=False, **kwargs)
+        proc = driver.run_job(id, recycle=recycle, wait=wait, **kwargs)
         if wait is True:
             proc.wait()
             if proc.returncode > 0:
