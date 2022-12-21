@@ -2118,7 +2118,7 @@ class Task(Process):
             conn = db.connect()
             th = db.tables.task_history
             for record in self.history:
-                record_id = record['id']
+                task_id = record['id']
                 process_id = record['run_id']
                 status = record['status']
                 if status == 'D':
@@ -2130,14 +2130,13 @@ class Task(Process):
                                 logger.debug(f'{step.last} recycled '
                                              f'by {process_id=}')
                             elif step.last.key_field.associated(self):
-                                task_id = process_id
                                 step.last.recycle(task_id)
                                 logger.debug(f'{step.last} recycled '
                                              f'by {task_id=}')
                     update = th.update().values(status='C').\
-                                where(th.c.id == record_id)
+                                where(th.c.id == task_id)
                     conn.execute(update)
-                    logger.debug(f'{self} recycled by {record_id=}')
+                    logger.debug(f'{self} recycled by {task_id=}')
 
     def prepare(self):
         """Make all necessary task preparations."""
@@ -2558,19 +2557,18 @@ class Step(Process, Unit):
             conn = db.connect()
             sh = db.tables.step_history
             for record in self.history:
-                record_id = record['id']
+                step_id = record['id']
                 status = record['status']
                 if status == 'D':
                     if self.last.recyclable:
                         if self.last.key_field.associated(self):
-                            step_id = record_id
                             self.last.recycle(step_id)
                             logger.debug(f'{self.last} recycled '
                                          f'by {step_id=}')
                     update = sh.update().values(status='C').\
-                                where(sh.c.id == record_id)
+                                where(sh.c.id == step_id)
                     conn.execute(update)
-                    logger.debug(f'{self} recycled by {record_id=}')
+                    logger.debug(f'{self} recycled by {step_id=}')
 
     def _start(self):
         logger.info(f'Starting {self} from {self.pipeline}...')
