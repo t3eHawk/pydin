@@ -234,11 +234,13 @@ def to_process(exe, path=None, args=None, env=None, devnull=False, spawn=True):
         command.extend(args)
     kwargs = {}
     kwargs['env'] = env
-    kwargs['stdin'] = sp.DEVNULL if devnull else sp.PIPE
-    kwargs['stdout'] = sp.DEVNULL if devnull else sp.PIPE
-    kwargs['stderr'] = sp.DEVNULL if devnull else sp.PIPE
-    if WINDOWS and spawn:
-        kwargs['creationflags'] = sp.CREATE_NO_WINDOW
+    if LINUX or MACOS:
+        kwargs['stdin'] = sp.DEVNULL if devnull else sp.PIPE
+        kwargs['stdout'] = sp.DEVNULL if devnull else sp.PIPE
+        kwargs['stderr'] = sp.DEVNULL if devnull else sp.PIPE
+    elif WINDOWS:
+        if spawn:
+            kwargs['creationflags'] = sp.CREATE_NO_WINDOW
     proc = sp.Popen(command, **kwargs)
     return proc
 
