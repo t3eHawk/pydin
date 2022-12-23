@@ -288,7 +288,7 @@ create table pd_config (
   node_seqno   number(*, 0) not null,
   node_name    varchar2(50 char),
   node_desc    varchar2(200 char),
-  node_type    varchar2(50 char),
+  node_type    varchar2(50 char) not null,
   node_config  varchar2(4000 char),
   source_name  varchar2(50 char) not null,
   custom_query clob,

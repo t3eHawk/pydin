@@ -189,7 +189,7 @@ create table pd_config (
   node_seqno   integer not null,
   node_name    text,
   node_desc    text,
-  node_type    text,
+  node_type    text not null,
   node_config  text,
   source_name  text not null,
   custom_query text,
