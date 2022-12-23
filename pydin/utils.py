@@ -235,9 +235,10 @@ def to_process(exe, path=None, args=None, env=None, devnull=False, spawn=True):
     kwargs = {}
     kwargs['env'] = env
     if LINUX or MACOS:
-        kwargs['stdin'] = sp.DEVNULL if devnull else sp.PIPE
-        kwargs['stdout'] = sp.DEVNULL if devnull else sp.PIPE
-        kwargs['stderr'] = sp.DEVNULL if devnull else sp.PIPE
+        if devnull:
+            kwargs['stdin'] = sp.DEVNULL if devnull else sp.PIPE
+            kwargs['stdout'] = sp.DEVNULL if devnull else sp.PIPE
+            kwargs['stderr'] = sp.DEVNULL if devnull else sp.PIPE
     elif WINDOWS:
         if spawn:
             kwargs['creationflags'] = sp.CREATE_NO_WINDOW
