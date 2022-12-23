@@ -612,7 +612,7 @@ class Manager():
         rerun_limit = input('Limit of reruns number [1...n] ') or None
         if isinstance(rerun_limit, str):
             if rerun_limit.isdigit() or rerun_limit == '-':
-                if rerun_limit.isdigit() and rerun_days != '0':
+                if rerun_limit.isdigit() and rerun_limit != '0':
                     rerun_limit = int(rerun_limit)
                 else:
                     rerun_limit = db.null
