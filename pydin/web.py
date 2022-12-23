@@ -74,7 +74,7 @@ class Server():
         """Start API server."""
         conn = db.connect()
         table = db.tables.components
-        select = table.select()
+        select = table.select().where(table.c.id == 'RESTAPI')
         result = conn.execute(select).first()
         status = to_boolean(result.status)
         if not status:
