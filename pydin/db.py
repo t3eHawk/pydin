@@ -16,7 +16,7 @@ class Database(pe.Database):
     """Represents database schema and objects."""
 
     def __init__(self):
-        if config['DATABASE'].get('vendor'):
+        if config['DATABASE'].get('vendor_name'):
             self.configure()
         self.null = self.Null()
         pass
@@ -120,21 +120,21 @@ class Database(pe.Database):
         return self.Record(self, table, id=id)
 
     def configure(self):
-        vendor = config['DATABASE']['vendor']
-        driver = config['DATABASE'].get('driver')
+        vendor_name = config['DATABASE']['vendor_name']
+        driver_name = config['DATABASE'].get('driver_name')
         path = config['DATABASE'].get('path')
         host = config['DATABASE'].get('host')
         port = config['DATABASE'].get('port')
         sid = config['DATABASE'].get('sid')
-        service = config['DATABASE'].get('service')
+        service_name = config['DATABASE'].get('service_name')
         username = config['DATABASE'].get('username')
         password = config['DATABASE'].get('password')
-        client = config['DATABASE'].get('client')
-        if client and vendor == 'oracle':
-            oracle.init_oracle_client(lib_dir=client)
-        super().__init__(vendor=vendor, driver=driver,
+        client_path = config['DATABASE'].get('client_path')
+        if client_path and vendor_name == 'oracle':
+            oracle.init_oracle_client(lib_dir=client_path)
+        super().__init__(vendor=vendor_name, driver=driver_name,
                          path=path, host=host, port=port,
-                         sid=sid, service=service,
+                         sid=sid, service=service_name,
                          user=username, password=password)
 
     def load(self):

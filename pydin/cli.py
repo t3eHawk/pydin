@@ -520,9 +520,9 @@ class Manager():
         from .config import user_config
         print('Configure the listed options to set up the DB schema.')
         print('Application DB schema will be automatically deployed.')
-        vendor = input('Enter your DB vendor name: ')
-        config['DATABASE']['vendor'] = vendor
-        if vendor == 'sqlite':
+        vendor_name = input('Enter your DB vendor name: ')
+        config['DATABASE']['vendor_name'] = vendor_name
+        if vendor_name == 'sqlite':
             path = os.path.abspath('pydin.sqlite3')
             if os.path.exists(path):
                 print(f'SQLite DB file {path} already exists!')
@@ -530,29 +530,32 @@ class Manager():
             else:
                 config['DATABASE']['path'] = path
                 db.configure()
-        elif vendor == 'oracle':
+        elif vendor_name == 'oracle':
             print('Note: you can skip this items '
                   'and set them up later yourself.')
-            driver = 'cx_oracle'
-            config['DATABASE']['driver'] = driver
+            driver_name = 'cx_oracle'
+            config['DATABASE']['driver_name'] = driver_name
             host = input('DB host address: ')
             port = input('DB port number: ')
             sid = input('DB SID: ')
-            service = input('DB service name: ')
+            service_name = input('DB service name: ')
             username = input('User name: ')
             password = getpass.getpass('User password: ')
-            for k, v in dict(host=host, port=port, sid=sid, service=service,
+            for k, v in dict(host=host, port=port, sid=sid,
+                             service_name=service_name,
                              username=username, password=password).items():
                 if v:
                     config['DATABASE'][k] = v
-            if host and port and (sid or service) and username and password:
-                db.configure()
+            if host and port:
+                if sid or service_name:
+                    if username and password:
+                        db.configure()
             else:
                 print(f'Please configure the DB connection in {user_config}. '
                       f'Then deploy the DB schema using scripts from GitHub.')
                 return
         else:
-            print(f'Sorry. This DB vendor {vendor} is not supported.')
+            print(f'Sorry. This DB vendor {vendor_name} is not supported.')
             return
         config.save()
         print(f'Schema configured. Check configuration file {user_config}.')
@@ -561,10 +564,10 @@ class Manager():
             if sure in ('Y', 'n'):
                 if sure == 'Y':
                     db.deploy()
-                    if vendor == 'sqlite':
+                    if vendor_name == 'sqlite':
                         print(f'Schema deployed in SQLite DB file {path}.')
-                    elif vendor == 'oracle':
-                        address = f'{host}/{sid or service}'
+                    elif vendor_name == 'oracle':
+                        address = f'{host}/{sid or service_name}'
                         print(f'Schema deployed in Oracle DB {address}.')
                 break
 

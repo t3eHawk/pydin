@@ -179,7 +179,7 @@ class Logging():
         def __init__(self, logging, database=None, schema=None, table=None):
             self.logging = logging if isinstance(logging, Logging) else None
             self.database = database if isinstance(database, str) else None
-            if isinstance(database, Database) is True:
+            if isinstance(database, Database):
                 self.database = database
             elif isinstance(database, str):
                 self.database = connector.receive(database)
@@ -251,7 +251,7 @@ class Logging():
         def __init__(self, logging, database=None, schema=None, table=None):
             self.logging = logging if isinstance(logging, Logging) else None
             self.database = database if isinstance(database, str) else None
-            if isinstance(database, Database) is True:
+            if isinstance(database, Database):
                 self.database = database
             elif isinstance(database, str):
                 self.database = connector.receive(database)
@@ -333,7 +333,7 @@ class Logging():
         def __init__(self, logging, database=None, schema=None, table=None):
             self.logging = logging if isinstance(logging, Logging) else None
             self.database = database if isinstance(database, str) else None
-            if isinstance(database, Database) is True:
+            if isinstance(database, Database):
                 self.database = database
             elif isinstance(database, str):
                 self.database = connector.receive(database)
@@ -397,7 +397,7 @@ class Logging():
         def __init__(self, logging, database=None, schema=None, table=None):
             self.logging = logging if isinstance(logging, Logging) else None
             self.database = database if isinstance(database, str) else None
-            if isinstance(database, Database) is True:
+            if isinstance(database, Database):
                 self.database = database
             elif isinstance(database, str):
                 self.database = connector.receive(database)
@@ -584,13 +584,13 @@ class Server():
 class Database(pe.Database):
     """Represents database server."""
 
-    def __init__(self, name=None, vendor=None, driver=None, path=None,
-                 host=None, port=None, sid=None, service=None,
+    def __init__(self, name=None, vendor_name=None, driver_name=None,
+                 path=None, host=None, port=None, sid=None, service_name=None,
                  user=None, password=None):
         self.name = name.lower() if isinstance(name, str) else None
-        super().__init__(vendor=vendor, driver=driver,
+        super().__init__(vendor=vendor_name, driver=driver_name,
                          path=path, host=host, port=port,
-                         sid=sid, service=service,
+                         sid=sid, service=service_name,
                          user=user, password=password)
 
         cache = il.import_module('pydin.cache')
@@ -618,12 +618,12 @@ class Connector(dict):
         def __new__(self, name=None, **options):
             """Create connection object using options passed."""
             given_options = options.keys()
-            database_options = {'vendor', 'driver', 'database'}
+            database_options = {'vendor_name', 'driver_name', 'database'}
             server_options = {'protocol', 'host', 'port'}
 
             if set.intersection(database_options, given_options):
-                vendor = options['vendor']
-                driver = options.get('driver')
+                vendor_name = options['vendor_name']
+                driver_name = options.get('driver_name')
                 database = options.get('database')
                 username = options.get('username')
                 password = options.get('password')
@@ -640,12 +640,13 @@ class Connector(dict):
 
                 service = options.get('service')
                 service_name = options.get('service_name')
-                service = coalesce(service, service_name)
+                service_name = coalesce(service, service_name)
 
-                return Database(name=name, vendor=vendor, driver=driver,
+                return Database(name=name, vendor_name=vendor_name,
+                                driver_name=driver_name,
                                 user=username, password=password,
                                 path=path, host=host, port=port,
-                                sid=database, service=service)
+                                sid=database, service_name=service_name)
             elif set.intersection(server_options, given_options):
                 protocol = options.get('protocol').lower()
                 host = options.get('host')
@@ -1087,13 +1088,13 @@ LOG_ALARMING = False
 LOG_MAXSIZE = 10485760
 LOG_MAXDAYS = 1
 
-DATABASE_VENDOR = None
-DATABASE_DRIVER = None
+DATABASE_VENDOR_NAME = None
+DATABASE_DRIVER_NAME = None
 DATABASE_PATH = None
 DATABASE_HOST = None
 DATABASE_PORT = None
 DATABASE_SID = None
-DATABASE_SERVICE = None
+DATABASE_SERVICE_NAME = None
 DATABASE_USERNAME = None
 DATABASE_PASSWORD = None
 

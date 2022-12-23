@@ -463,14 +463,14 @@ class Driver():
                     'owner': ''
                 },
                 'DATABASE': {
-                    'vendor': '',
-                    'driver': '',
-                    'client': '',
+                    'vendor_name': '',
+                    'driver_name': '',
+                    'client_path': '',
                     'path': '',
                     'host': '',
                     'port': '',
                     'sid': '',
-                    'service': '',
+                    'service_name': '',
                     'username': '',
                     'password': ''
                 },

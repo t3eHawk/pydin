@@ -79,7 +79,7 @@ def installed():
         return False
     elif not config.get('DATABASE'):
         return False
-    elif not config['DATABASE'].get('vendor'):
+    elif not config['DATABASE'].get('vendor_name'):
         return False
     elif not config.get('API'):
         return False
