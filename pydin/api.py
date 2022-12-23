@@ -451,9 +451,10 @@ class Driver():
         """Create global config."""
         logger.debug('Creating global config...')
         from .config import user_config
-        if os.path.exists(user_config) is True:
-            raise Exception(f'file {user_config} already exists!')
-        else:
+        dirpath = os.path.dirname(user_config)
+        if not os.path.exists(dirpath):
+            os.mkdir(dirpath)
+        if not os.path.exists(user_config):
             config_parser = configparser.ConfigParser()
             config_dict = {
                 'GENERAL': {
@@ -496,6 +497,8 @@ class Driver():
                 config_parser.write(fh, space_around_delimiters=False)
             logger.debug(f'Global config {user_config} created')
             return user_config
+        else:
+            raise Exception(f'file {user_config} already exists!')
 
     def create_repo(self, url=None):
         """Create git repository."""
