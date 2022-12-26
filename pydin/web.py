@@ -38,6 +38,7 @@ class Server():
     def __init__(self, host=None, port=None, dev=False):
         self.app = app
         argv = sys.argv.copy()
+        dev = True if 'dev' in argv else dev
 
         self.host = host or '0.0.0.0'
         self.port = port or 8080
@@ -51,9 +52,7 @@ class Server():
         self.start_date = None
         self.stop_date = None
         self.status = None
-
-        dev = True if 'dev' in argv else dev
-        self.dev = dev if isinstance(dev, bool) is True else False
+        self.debug = self.dev = dev if isinstance(dev, bool) else False
 
         logger.configure(file=False, format='[{rectype}] {message}\n',
                          alarming=False)
@@ -82,7 +81,7 @@ class Server():
             app = 'pydin.web:app'
             env = os.environ.copy()
             env['PYDIN_HOME'] = locate()
-            if self.dev is True:
+            if self.dev:
                 script = ['flask', 'run']
                 args = ['--host', self.host, '--port', str(self.port)]
                 cmd = [arg for arg in [*script, *args] if arg is not None]
@@ -90,25 +89,20 @@ class Server():
                 env['FLASK_APP'] = app
                 env['FLASK_ENV'] = mode
                 try:
-                    proc = sp.Popen(cmd, env=env)
-                    proc.wait()
+                    self.proc = sp.Popen(cmd, env=env)
+                    self.log()
+                    self.proc.wait()
                 except KeyboardInterrupt:
-                    proc.terminate()
+                    self.status = False
+                    self.stop_date = dt.datetime.now()
+                    self.log()
+                    self.proc.terminate()
             else:
                 script = 'waitress-serve'
                 args = ['--host', self.host, '--port', str(self.port), app]
                 args = [arg for arg in args if arg is not None]
-                proc = to_process(script, args=args, env=env, devnull=True)
-            pid = proc.pid
-            debug = 'X' if self.dev else None
-            update = table.update().where(table.c.id == 'RESTAPI')
-            update = update.values(status='Y', pid=pid, url=self.url,
-                                   start_date=self.start_date,
-                                   stop_date=self.stop_date,
-                                   server_name=self.server_name,
-                                   user_name=self.user_name,
-                                   debug=debug)
-            conn.execute(update)
+                self.proc = to_process(script, args=args, env=env, devnull=True)
+                self.log()
         else:
             pid = result.pid
             print(f'Server already working on PID[{pid}]')
@@ -130,6 +124,20 @@ class Server():
                 print(f'Server on PID[{pid}] stopped with error: {error}')
         update = table.update().where(table.c.id == 'RESTAPI')
         update = update.values(status='N', stop_date=self.stop_date)
+        conn.execute(update)
+
+    def log(self):
+        conn = db.connect()
+        table = db.tables.components
+        update = table.update().where(table.c.id == 'RESTAPI')
+        update = update.values(status='Y' if self.status else 'N',
+                               user_name=self.user_name,
+                               server_name=self.server_name,
+                               pid=self.proc.pid,
+                               debug='Y' if self.debug else None,
+                               url=self.url,
+                               start_date=self.start_date,
+                               stop_date=self.stop_date)
         conn.execute(update)
 
     pass
