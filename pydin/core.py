@@ -609,6 +609,10 @@ class Scheduler():
         elif re.match(r'^\d+-\d+$', period) is not None:
             period = [int(i) for i in re.findall(r'\d+', period)]
             return True if unit in range(period[0], period[1]+1) else False
+        # Check if period is a start value for unit.
+        elif re.match(r'^\d+\+$', period) is not None:
+            period = int(re.search(r'\d+', period).group())
+            return True if unit >= period else False
         # Check if period is a list and unit is in this list.
         elif re.match(r'^\d+,\s*\d+.*$', period):
             period = [int(i) for i in re.findall(r'\d+', period)]
