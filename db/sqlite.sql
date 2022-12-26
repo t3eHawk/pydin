@@ -24,6 +24,7 @@ create table pd_schedule (
   rerun_limit     integer,
   rerun_days      integer,
   sleep_period    text,
+  wake_up_period  text,
   email_list      text,
   alarm           text,
   debug           text,

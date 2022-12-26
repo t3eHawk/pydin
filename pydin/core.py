@@ -114,7 +114,8 @@ class Scheduler():
                      start_timestamp=None, end_timestamp=None,
                      env=None, args=None, timeout=None, parallelism=None,
                      rerun_times=None, rerun_limit=None, rerun_days=None,
-                     sleep_period=None, tag=None, record_id=None, added=None):
+                     sleep_period=None, wake_up_period=None,
+                     tag=None, record_id=None, added=None):
             self.id, self.scheduler = id, scheduler
             self.setup(name=name, desc=desc, status=status,
                        mday=mday, hour=hour, min=min, sec=sec,
@@ -126,6 +127,7 @@ class Scheduler():
                        rerun_times=rerun_times, rerun_limit=rerun_limit,
                        rerun_days=rerun_days,
                        sleep_period=sleep_period,
+                       wake_up_period=wake_up_period,
                        tag=tag, record_id=record_id, added=added)
             pass
 
@@ -170,7 +172,8 @@ class Scheduler():
                 parallelism=self.parallelism,
                 rerun_limit=self.rerun_limit,
                 rerun_days=self.rerun_days,
-                sleep_period=self.sleep_period
+                sleep_period=self.sleep_period,
+                wake_up_period=self.wake_up_period
             )
 
         def setup(self, name=None, desc=None, status=None,
@@ -179,7 +182,8 @@ class Scheduler():
                   start_timestamp=None, end_timestamp=None,
                   env=None, args=None, timeout=None, parallelism=None,
                   rerun_times=None, rerun_limit=None, rerun_days=None,
-                  sleep_period=None, tag=None, record_id=None, added=None):
+                  sleep_period=None, wake_up_period=None,
+                  tag=None, record_id=None, added=None):
             """Configure this job."""
             self.name = name
             self.desc = desc
@@ -198,6 +202,7 @@ class Scheduler():
             self.timeout = timeout
             self.parallelism = parallelism
             self.sleep_period = sleep_period
+            self.wake_up_period = wake_up_period
 
             self.tag = tag
             self.record_id = record_id
@@ -247,7 +252,8 @@ class Scheduler():
                        parallelism=record.parallelism,
                        rerun_limit=record.rerun_limit,
                        rerun_days=record.rerun_days,
-                       sleep_period=record.sleep_period)
+                       sleep_period=record.sleep_period,
+                       wake_up_period=record.wake_up_period)
             return self
 
         def from_run(self, record):
@@ -271,6 +277,7 @@ class Scheduler():
                        timeout=record.timeout,
                        parallelism=record.parallelism,
                        sleep_period=record.sleep_period,
+                       wake_up_period=record.wake_up_period,
                        added=record.added,
                        rerun_times=record.rerun_times,
                        rerun_limit=record.rerun_limit,
@@ -311,14 +318,14 @@ class Scheduler():
 
         def was_scheduled(self, timestamp):
             """Check if this job was scheduled at a given timestamp."""
-            time = self.scheduler.parser(timestamp)
+            s = self.scheduler.parser(timestamp)
             if (
-                self.scheduler.matcher(self.mday, time.mday)
-                and self.scheduler.matcher(self.hour, time.hour)
-                and self.scheduler.matcher(self.min, time.min)
-                and self.scheduler.matcher(self.sec, time.sec)
-                and self.scheduler.matcher(self.wday, time.wday)
-                and self.scheduler.matcher(self.yday, time.yday)
+                self.scheduler.matcher(self.mday, s.mday)
+                and self.scheduler.matcher(self.hour, s.hour)
+                and self.scheduler.matcher(self.min, s.min)
+                and self.scheduler.matcher(self.sec, s.sec)
+                and self.scheduler.matcher(self.wday, s.wday)
+                and self.scheduler.matcher(self.yday, s.yday)
             ):
                 return True
             else:
@@ -331,11 +338,17 @@ class Scheduler():
         def was_sleeping(self, timestamp):
             """Check if the sleep window was active at a timestamp."""
             if self.sleep_period:
-                time_unit = self.scheduler.parser(timestamp).hour
-                if self.scheduler.matcher(self.sleep_period, time_unit):
+                s = self.scheduler.parser(timestamp)
+                if self.scheduler.matcher(self.sleep_period, s.hour):
                     return True
                 else:
-                    return False
+                    if self.wake_up_period:
+                        if self.scheduler.matcher(self.wake_up_period, s.min):
+                            return False
+                        else:
+                            return True
+                    else:
+                        return False
             else:
                 return False
 
@@ -400,6 +413,10 @@ class Scheduler():
                 return True
             else:
                 return False
+
+        def is_awake_available(self):
+            """Check whether wake up is available for this job or not."""
+
 
         pass
 
@@ -520,7 +537,8 @@ class Scheduler():
                              s.c.yearday, s.c.monthday, s.c.weekday,
                              s.c.trigger_id, s.c.start_date, s.c.end_date,
                              s.c.environment, s.c.arguments,
-                             s.c.timeout, s.c.parallelism, s.c.sleep_period,
+                             s.c.timeout, s.c.parallelism,
+                             s.c.sleep_period, s.c.wake_up_period,
                              h.c.rerun_times, s.c.rerun_limit, s.c.rerun_days]).
                   select_from(sa.join(h, s, h.c.job_id == s.c.id)).
                   where(sa.and_(h.c.status.in_(['E', 'T']),
@@ -545,7 +563,8 @@ class Scheduler():
                              s.c.yearday, s.c.monthday, s.c.weekday,
                              s.c.trigger_id, s.c.start_date, s.c.end_date,
                              s.c.environment, s.c.arguments,
-                             s.c.timeout, s.c.parallelism, s.c.sleep_period,
+                             s.c.timeout, s.c.parallelism,
+                             s.c.sleep_period, s.c.wake_up_period,
                              h.c.rerun_times, s.c.rerun_limit, s.c.rerun_days]).
                   select_from(sa.join(h, s, h.c.job_id == s.c.id)).
                   where(h.c.status == 'W').

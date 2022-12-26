@@ -156,8 +156,8 @@ class Database(pe.Database):
                   environment=None, arguments=None,
                   timeout=None, parallelism=None,
                   rerun_limit=None, rerun_days=None,
-                  sleep_period=None, alarm=None,
-                  email_list=None, debug=None):
+                  sleep_period=None, wake_up_period=None,
+                  alarm=None, email_list=None, debug=None):
         """Normalize parameters in accordance with their data types."""
         values = {}
         setup = [{'column': 'job_name', 'value': job_name,
@@ -198,6 +198,8 @@ class Database(pe.Database):
                  {'column': 'rerun_days', 'value': rerun_days,
                   'types': (int,)},
                  {'column': 'sleep_period', 'value': sleep_period,
+                  'types': (int, str)},
+                 {'column': 'wake_up_period', 'value': wake_up_period,
                   'types': (int, str)},
                  {'column': 'alarm', 'value': alarm,
                   'types': (bool,),

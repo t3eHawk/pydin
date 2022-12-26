@@ -24,6 +24,7 @@ create table pd_schedule (
   rerun_limit     number(*, 0),
   rerun_days      number(*, 0),
   sleep_period    varchar2(100 char),
+  wake_up_period  varchar2(100 char),
   email_list      varchar2(100 char),
   alarm           varchar2(1 char),
   debug           varchar2(1 char),

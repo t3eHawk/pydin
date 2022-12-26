@@ -235,7 +235,7 @@ def to_process(exe, path=None, args=None, env=None, devnull=False, spawn=True):
     kwargs = {}
     kwargs['env'] = env
     if LINUX or MACOS:
-        if devnull:
+        if spawn:
             kwargs['stdin'] = sp.DEVNULL if devnull else sp.PIPE
             kwargs['stdout'] = sp.DEVNULL if devnull else sp.PIPE
             kwargs['stderr'] = sp.DEVNULL if devnull else sp.PIPE

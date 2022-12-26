@@ -153,8 +153,8 @@ class Driver():
                    trig=None, start_date=None, end_date=None,
                    env=None, args=None, timeout=None, parallelism=None,
                    rerun_limit=None, rerun_days=None,
-                   sleep_period=None, alarm=None, email_list=None,
-                   debug=None, norepo=False):
+                   sleep_period=None, wake_up_period=None,
+                   alarm=None, email_list=None, debug=None, norepo=False):
         """Create job with all necessary elements."""
         logger.debug('Creating job...')
         conn = db.connect()
@@ -176,6 +176,7 @@ class Driver():
                               rerun_limit=rerun_limit,
                               rerun_days=rerun_days,
                               sleep_period=sleep_period,
+                              wake_up_period=wake_up_period,
                               alarm=alarm,
                               email_list=email_list,
                               debug=debug)
@@ -244,8 +245,8 @@ class Driver():
                       trig=None, start_date=None, end_date=None,
                       env=None, args=None, timeout=None, parallelism=None,
                       rerun_limit=None, rerun_days=None,
-                      sleep_period=None, alarm=None, email_list=None,
-                      debug=None):
+                      sleep_period=None, wake_up_period=None,
+                      alarm=None, email_list=None, debug=None):
         """Modify job configuration."""
         repr = f'Job[{id}]'
         logger.debug(f'Editing {repr}...')
@@ -267,6 +268,7 @@ class Driver():
                               rerun_limit=rerun_limit,
                               rerun_days=rerun_days,
                               sleep_period=sleep_period,
+                              wake_up_period=wake_up_period,
                               alarm=alarm,
                               email_list=email_list,
                               debug=debug)

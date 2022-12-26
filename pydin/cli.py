@@ -629,7 +629,12 @@ class Manager():
                 rerun_days = to_none(rerun_days)
         sleep_period = input('Hours of sleep window [0-23] ') or None
         if isinstance(sleep_period, str):
-            sleep_period = db.null if sleep_period == '-' else sleep_period
+            if sleep_period == '-':
+                sleep_period = db.null
+        wake_up_period = input('Minutes of wake up window [0-59] ') or None
+        if isinstance(wake_up_period, str):
+            if wake_up_period == '-':
+                wake_up_period = db.null
 
         print()
         alarm = input('Enable alarming for this job [Y] ')
@@ -654,6 +659,7 @@ class Manager():
                   'rerun_limit': rerun_limit,
                   'rerun_days': rerun_days,
                   'sleep_period': sleep_period,
+                  'wake_up_period': wake_up_period,
                   'alarm': alarm,
                   'email_list': email_list}
 
