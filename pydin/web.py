@@ -63,7 +63,6 @@ class Server():
                 self.start()
             elif argv[1] == 'stop':
                 self.stop()
-        pass
 
     @property
     def url(self):
@@ -132,7 +131,8 @@ class Server():
         update = table.update().where(table.c.id == 'RESTAPI')
         update = update.values(status='N', stop_date=self.stop_date)
         conn.execute(update)
-        pass
+
+    pass
 
 
 @auth.verify_token
@@ -170,7 +170,6 @@ def start_scheduler():
         return SERVER_ERROR
     else:
         return OK
-    pass
 
 
 @app.route('/api/stop-scheduler', methods=['POST'])
@@ -197,7 +196,7 @@ def enable_job():
     """."""
     request = flask.request
     id = request.args.get('id')
-    if id is not None and id.isdigit() is True:
+    if id is not None and id.isdigit():
         driver = Driver(root=root)
         result = driver.enable_job(id)
         if result is True:
@@ -206,7 +205,6 @@ def enable_job():
             return SERVER_ERROR
     else:
         return BAD_REQUEST
-    pass
 
 
 @app.route('/api/disable-job', methods=['POST'])
@@ -215,7 +213,7 @@ def disable_job():
     """."""
     request = flask.request
     id = request.args.get('id')
-    if id is not None and id.isdigit() is True:
+    if id is not None and id.isdigit():
         driver = Driver(root=root)
         result = driver.disable_job(id)
         if result is True:
@@ -224,7 +222,6 @@ def disable_job():
             return SERVER_ERROR
     else:
         return BAD_REQUEST
-    pass
 
 
 @app.route('/api/run-job', methods=['POST'])
@@ -233,7 +230,7 @@ def run_job():
     """."""
     request = flask.request
     id = request.args.get('id')
-    if id is not None and id.isdigit() is True:
+    if id is not None and id.isdigit():
         process = request.args.get('process')
         date = request.args.get('date')
         recycle = json.loads(request.args.get('recycle', 'false'))
@@ -255,7 +252,23 @@ def run_job():
             return OK
     else:
         return BAD_REQUEST
-    pass
+
+
+@app.route('/api/cancel-run', methods=['POST'])
+@auth.login_required
+def cancel_run():
+    """."""
+    request = flask.request
+    process_id = request.args.get('id')
+    if process_id and process_id.isdigit():
+        process_id = int(process_id)
+        driver = Driver(root=root)
+        try:
+            driver.cancel_run(process_id)
+        except Exception:
+            return BAD_REQUEST
+        else:
+            return OK
 
 
 @app.route('/api/sync-repo', methods=['POST'])
@@ -267,7 +280,7 @@ def sync_repo():
     driver = Driver(root=root)
     driver.pull_repo()
     kwargs = {}
-    if id is not None and id.isdigit() is True:
+    if id is not None and id.isdigit():
         kwargs['id'] = int(id)
     driver.push_repo(**kwargs)
     return OK

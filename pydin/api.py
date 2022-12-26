@@ -29,7 +29,6 @@ class Driver():
         logger.configure(status=False, file=False, console=False,
                          format='[{rectype}] {message}\n',
                          alarming=False)
-        pass
 
     def create_scheduler(self, name=None, desc=None, path=None):
         """Deploy scheduler with all necessary elements."""
@@ -81,7 +80,6 @@ class Driver():
         with open(config_path, 'w') as fh:
             config_parser.write(fh, space_around_delimiters=False)
         logger.debug(f'Configuration file {config_path} saved')
-        pass
 
     def start_scheduler(self, path=None):
         """Start scheduler."""
@@ -110,7 +108,6 @@ class Driver():
         else:
             logger.debug('Scheduler cannot be started')
             raise Exception(f'file {path} does not exist')
-        pass
 
     def stop_scheduler(self, path=None):
         """Stop scheduler."""
@@ -123,13 +120,11 @@ class Driver():
         else:
             logger.debug('Scheduler cannot be stopped')
             raise Exception(f'file {path} does not exist')
-        pass
 
     def restart_scheduler(self, path=None):
         """Restart scheduler."""
         self.stop_scheduler(path=path)
         self.start_scheduler(path=path)
-        pass
 
     def report_scheduler(self):
         """Define current scheduler status."""
@@ -152,7 +147,6 @@ class Driver():
             else:
                 logger.debug('Scheduler is running')
                 return result.pid
-        pass
 
     def create_job(self, name=None, desc=None, mday=None,
                    hour=None, min=None, sec=None, wday=None, yday=None,
@@ -283,7 +277,6 @@ class Driver():
             logger.debug(f'{repr} edited')
         else:
             logger.debug(f'{repr} nothing to edit')
-        pass
 
     def enable_job(self, id):
         """Change job status to Y."""
@@ -299,7 +292,6 @@ class Driver():
         else:
             logger.debug(f'{repr} does not exist')
             return False
-        pass
 
     def disable_job(self, id):
         """Change job status to N."""
@@ -315,7 +307,6 @@ class Driver():
         else:
             logger.debug(f'{repr} does not exist')
             return False
-        pass
 
     def delete_job(self, id):
         """Delete particular job."""
@@ -333,7 +324,6 @@ class Driver():
         if os.path.exists(path) is True:
             self.push_repo(id=id)
         logger.debug(f'{repr} folder {folder} removed')
-        pass
 
     def list_jobs(self, id=None):
         """Generate list with all scheduled jobs."""
@@ -348,7 +338,6 @@ class Driver():
         for row in result:
             yield dict(row)
         logger.debug('Jobs listed')
-        pass
 
     def run_job(self, id, tag=None, date=None, process=None, trigger=None,
                 recycle=None, debug=None, noalarm=None, solo=None, wait=True):
@@ -402,7 +391,6 @@ class Driver():
             logger.debug(f'Found {repr} running as Run[{run}]')
             self.cancel_run(run)
         logger.debug(f'All {repr} runs canceled')
-        pass
 
     def cancel_jobs(self):
         """Cancel all jobs."""
@@ -417,7 +405,6 @@ class Driver():
             logger.debug(f'Found Job[{job}] running as Run[{run}]')
             self.cancel_run(run)
         logger.debug(f'All jobs canceled')
-        pass
 
     def cancel_run(self, id):
         """Cancel particular run."""
@@ -445,7 +432,6 @@ class Driver():
             logger.debug(f'{repr} canceled')
         else:
             raise Exception(f'{repr} is not running')
-        pass
 
     def create_config(self):
         """Create global config."""
@@ -565,7 +551,6 @@ class Driver():
             return result
         else:
             logger.debug(f'Nothing to push in {repo.common_dir}')
-        pass
 
     @check_repo
     def pull_repo(self):
