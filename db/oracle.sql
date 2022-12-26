@@ -84,6 +84,7 @@ create table pd_run_history (
   recycle_ind varchar2(1 char),
   trigger_id  number(*, 0),
   data_dump   blob,
+  deactivated date,
   file_log    varchar2(25 char),
   text_log    clob,
   updated     date,

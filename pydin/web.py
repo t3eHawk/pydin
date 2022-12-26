@@ -271,6 +271,23 @@ def cancel_run():
             return OK
 
 
+@app.route('/api/deactivate-run', methods=['POST'])
+@auth.login_required
+def deactivate_run():
+    """."""
+    request = flask.request
+    process_id = request.args.get('id')
+    if process_id and process_id.isdigit():
+        process_id = int(process_id)
+        driver = Driver(root=root)
+        try:
+            driver.deactivate_run(process_id)
+        except Exception:
+            return BAD_REQUEST
+        else:
+            return OK
+
+
 @app.route('/api/sync-repo', methods=['POST'])
 @auth.login_required
 def sync_repo():

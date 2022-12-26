@@ -133,7 +133,10 @@ class Scheduler():
 
         def __repr__(self):
             if self.is_run:
-                return f'Job[{self.id}:{self.tag}]'
+                if self.record_id:
+                    return f'Job[{self.id}:{self.tag}:{self.record_id}]'
+                else:
+                    return f'Job[{self.id}:{self.tag}]'
             else:
                 return f'Job[{self.id}]'
 
@@ -544,7 +547,8 @@ class Scheduler():
                   where(sa.and_(h.c.status.in_(['E', 'T']),
                                 h.c.rerun_id.is_(None),
                                 h.c.rerun_now.is_(None),
-                                h.c.rerun_done.is_(None))).
+                                h.c.rerun_done.is_(None),
+                                h.c.deactivated.is_(None))).
                   order_by(h.c.id))
         conn = db.connect()
         result = conn.execute(select).fetchall()
@@ -567,7 +571,7 @@ class Scheduler():
                              s.c.sleep_period, s.c.wake_up_period,
                              h.c.rerun_times, s.c.rerun_limit, s.c.rerun_days]).
                   select_from(sa.join(h, s, h.c.job_id == s.c.id)).
-                  where(h.c.status == 'W').
+                  where(sa.and_(h.c.status == 'W', h.c.deactivated.is_(None))).
                   order_by(h.c.id))
         conn = db.connect()
         result = conn.execute(select).fetchall()

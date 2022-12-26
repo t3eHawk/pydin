@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 import time as tm
+import datetime as dt
 
 import sqlalchemy as sa
 
@@ -434,6 +435,24 @@ class Driver():
             logger.debug(f'{repr} canceled')
         else:
             raise Exception(f'{repr} is not running')
+
+    def deactivate_run(self, id):
+        """Deactivate particular run."""
+        repr = f'Run[{id}]'
+        logger.debug(f'Requested to deactivate {repr}...')
+        conn = db.connect()
+        table = db.tables.run_history
+        select = table.select().where(table.c.id == id)
+        result = conn.execute(select).first()
+        deactivated = dt.datetime.now()
+        if result.status in ('W', 'E', 'T'):
+            update = (table.update().values(deactivated=deactivated).
+                      where(sa.and_(table.c.id == id,
+                                    table.c.status.in_(['W', 'E', 'T']))))
+            conn.execute(update)
+            logger.debug(f'{repr} deactivated')
+        else:
+            raise Exception(f'{repr} cannot be deactivated')
 
     def create_config(self):
         """Create global config."""

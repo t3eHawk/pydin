@@ -25,6 +25,7 @@ run jobs           {run_jobs}
 cancel job         {cancel_job}
 cancel jobs        {cancel_jobs}
 cancel run         {cancel_run}
+deactivate run     {deactivate_run}
 
 install            {install}
 create scheduler   {create_scheduler}

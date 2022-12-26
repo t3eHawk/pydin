@@ -18,6 +18,7 @@ List of available commands:
 
 /api/run-job          POST
 /api/cancel-run       POST
+/api/deactivate-run   POST
 
 /api/sync-repo        POST
 

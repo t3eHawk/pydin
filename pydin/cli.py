@@ -88,7 +88,7 @@ class Manager():
                      'enable_job', 'disable_job', 'delete_job',
                      'list_jobs',
                      'run_job', 'run_jobs', 'cancel_job', 'cancel_jobs',
-                     'cancel_run',
+                     'cancel_run', 'deactivate_run',
                      'create_config', 'edit_config',
                      'create_repo', 'sync_repo']
             docs = {}
@@ -438,6 +438,16 @@ class Manager():
             print(f'{repr} canceled.')
         pass
 
+    def deactivate_run(self, id):
+        """Deactivate run using its ID."""
+        id = self._check_id(id)
+        repr = f'Run[{id}]'
+        print(f'You are trying to deactivate {repr}...')
+        sure = self.sure or self._are_you_sure()
+        if sure:
+            self.driver.deactivate_run(id)
+            print(f'{repr} deactivated.')
+
     def create_config(self):
         """Create global configuration file."""
         config_path = self.driver.create_config()
@@ -514,6 +524,20 @@ class Manager():
                             help='show process stderr')
         args, anons = parser.parse_known_args()
         return args
+
+    def _header(self):
+        """Print main application header."""
+        path = os.path.join(os.path.dirname(__file__), 'samples/head.txt')
+        text = open(path, 'r').read()
+        print(text)
+
+    def _are_you_sure(self):
+        while True:
+            sure = input(f'Are you sure? [Y/n] ')
+            if sure in ('Y', 'n'):
+                sure = True if sure == 'Y' else False
+                break
+        return sure
 
     def _configure_database(self):
         """Configure database connection."""
@@ -675,9 +699,3 @@ class Manager():
             return int(id)
         else:
             raise TypeError('id must be digit')
-
-    def _header(self):
-        """Print main application header."""
-        path = os.path.join(os.path.dirname(__file__), 'samples/head.txt')
-        text = open(path, 'r').read()
-        print(text)
