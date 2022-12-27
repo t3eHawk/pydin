@@ -101,7 +101,7 @@ class Server():
                 script = 'waitress-serve'
                 args = ['--host', self.host, '--port', str(self.port), app]
                 args = [arg for arg in args if arg is not None]
-                self.proc = to_process(script, args=args, env=env, devnull=True)
+                self.proc = to_process(script, args=args, env=env)
                 self.log()
         else:
             pid = result.pid

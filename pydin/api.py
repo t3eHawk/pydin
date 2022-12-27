@@ -368,7 +368,7 @@ class Driver():
             if value is not None:
                 args += f' --{key} {value}'
         logger.debug(f'{exe=}, {path=}, {args=}')
-        proc = to_process(exe, path, args)
+        proc = to_process(exe, path, args, piped=wait)
         logger.debug(f'{repr} runs on PID {proc.pid}')
         if wait is True:
             logger.debug(f'Waiting for {repr} to finish...')

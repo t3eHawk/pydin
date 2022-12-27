@@ -219,10 +219,16 @@ def to_datetime(value):
     pass
 
 
-def to_process(exe, path=None, args=None, env=None, devnull=False, spawn=True):
+def to_thread(name, function):
+    """Initialize and return a new thread using given parameters."""
+    thread = th.Thread(name=name, target=function, daemon=True)
+    return thread
+
+
+def to_process(exe, path=None, args=None, env=None, piped=False):
     """Run the command in a separate process."""
     command = []
-    if re.match(r'^.*(\\|/).*$', exe) is not None:
+    if re.match(r'^.*(\\|/).*$', exe):
         exe = os.path.abspath(exe)
     command.append(exe)
     if path:
@@ -234,28 +240,19 @@ def to_process(exe, path=None, args=None, env=None, devnull=False, spawn=True):
         command.extend(args)
     kwargs = {}
     kwargs['env'] = env
-    if LINUX or MACOS:
-        if spawn:
-            kwargs['stdin'] = sp.DEVNULL if devnull else sp.PIPE
-            kwargs['stdout'] = sp.DEVNULL if devnull else sp.PIPE
-            kwargs['stderr'] = sp.DEVNULL if devnull else sp.PIPE
-    elif WINDOWS:
-        if spawn:
-            kwargs['creationflags'] = sp.CREATE_NO_WINDOW
+    kwargs['stdin'] = sp.PIPE if piped else sp.DEVNULL
+    kwargs['stdout'] = sp.PIPE if piped else sp.DEVNULL
+    kwargs['stderr'] = sp.PIPE if piped else sp.DEVNULL
+    if WINDOWS:
+        kwargs['creationflags'] = sp.CREATE_NO_WINDOW
     proc = sp.Popen(command, **kwargs)
     return proc
-
-
-def to_thread(name, function):
-    """Initialize and return a new thread using given parameters."""
-    thread = th.Thread(name=name, target=function, daemon=True)
-    return thread
 
 
 def to_python(path, args=None):
     """Run the Python script in a separate process."""
     python = sys.executable
-    proc = to_process(python, path, args, devnull=True, spawn=True)
+    proc = to_process(python, path, args)
     return proc
 
 

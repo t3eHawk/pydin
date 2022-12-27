@@ -94,9 +94,9 @@ class Scheduler():
                 logger.configure(file=False, debug=args.debug)
                 self.stop()
         else:
-            if args.start is True:
+            if args.start:
                 self.start()
-            elif args.stop is True:
+            elif args.stop:
                 logger.configure(file=False, debug=args.debug)
                 self.stop()
         pass
