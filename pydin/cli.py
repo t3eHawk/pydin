@@ -39,7 +39,6 @@ class Manager():
         # If argv more than one then command was entered.
         command = [arg for arg in sys.argv if arg.startswith('-') is False]
         self.parse(command)
-        pass
 
     def parse(self, command):
         """Parse and execute command."""
@@ -104,18 +103,15 @@ class Manager():
             print(text)
         else:
             self.unknown()
-        pass
 
     def incorrect(self, name):
         """Print message about incorrect command."""
         name = name.replace('_', ' ')
         print(f'Incorrect command. Type *{name} help* to see details.')
-        pass
 
     def unknown(self):
         """Print message about unknown command."""
         print('Unknown command. Type *help* to get list of commands.')
-        pass
 
     def start_console(self):
         """Start interactive console."""
@@ -131,7 +127,6 @@ class Manager():
                 command = ['manager.py', *command.split()]
                 self.parse(command)
         print('Good bye!')
-        pass
 
     def install(self):
         """Install application files in current location."""
@@ -157,76 +152,62 @@ class Manager():
         desc = input('Enter the description or leave empty:\n')
         self.driver.create_scheduler(name=name, desc=desc)
         print('Scheduler created in current location.')
-        pass
 
     def start_scheduler(self):
         """Start scheduler."""
         pid = self.driver.start_scheduler()
         if pid is not None:
-            print(f'Scheduler started (PID {pid}).')
+            print(f'Scheduler started on PID {pid}.')
         else:
             print('Scheduler failed to start')
-        pass
 
     def stop_scheduler(self):
         """Stop scheduler."""
         self.driver.stop_scheduler()
         print('Scheduler stopped.')
-        pass
 
     def restart_scheduler(self):
         """Restart scheduler."""
         self.stop_scheduler()
         self.start_scheduler()
         print('Scheduler restarted.')
-        pass
 
     def report_scheduler(self):
         """Show current scheduler status."""
         pid = self.driver.report_scheduler()
         if pid is not None:
-            print(f'Scheduler is running (PID {pid}).')
+            print(f'Scheduler is running on PID {pid}.')
         else:
             print('Scheduler is not running.')
-        pass
 
     def create_job(self, scenario=None):
         """Create job in scheduler of current location."""
         if scenario is None:
             print('Please follow the steps to create the job.')
             configuration = self._configure_job()
-        while True:
-            sure = input('Are you sure? [Y/n] ')
-            if sure in ('Y', 'n'):
-                break
-        if sure == 'Y':
+        sure = self._are_you_sure()
+        if sure:
             print('Creating job...')
             if scenario is None:
                 id = self.driver.create_job(**configuration)
             elif scenario == 'default':
                 id = self.driver.create_job()
-            print(f'Job created (ID {id}).')
+            print(f'Job created with ID {id}.')
         else:
             print('Operation canceled.')
-        pass
 
     def configure_job(self, id):
         """Configure job data in schedule table."""
         id = self._check_id(id)
         print('Please follow the steps to configure the job.')
         configuration = self._configure_job()
-        while True:
-            sure = input('Are you sure? [Y/n] ')
-            if sure in ('Y', 'n'):
-                break
-
-        if sure == 'Y':
+        sure = self._are_you_sure()
+        if sure:
             print('Editing job...')
             self.driver.configure_job(id, **configuration)
             print('Job edited.')
         else:
             print('Operation canceled.')
-        pass
 
     def edit_script(self, id):
         """Open job script in text editor."""
@@ -240,27 +221,24 @@ class Manager():
             proc.wait()
         else:
             print(f'File {path} does not exists.')
-        pass
 
     def enable_job(self, id):
         """Activate job."""
         id = self._check_id(id)
         result = self.driver.enable_job(id)
         if result is True:
-            print(f'Job enabled (ID {id}).')
+            print(f'Job {id} enabled.')
         else:
-            print(f'Job does not exist (ID {id}).')
-        pass
+            print(f'Job {id} does not exist.')
 
     def disable_job(self, id):
         """Deactivate job."""
         id = self._check_id(id)
         result = self.driver.disable_job(id)
         if result is True:
-            print(f'Job disabled (ID {id}).')
+            print(f'Job {id} disabled.')
         else:
-            print(f'Job does not exist (ID {id}).')
-        pass
+            print(f'Job {id} does not exist.')
 
     def delete_job(self, id):
         """Delete job."""
@@ -279,7 +257,6 @@ class Manager():
                 print(f'{repr} deleted.')
         else:
             print(f'{repr} delete was not confirmed.')
-        pass
 
     def list_jobs(self, id=None):
         """Show all scheduled jobs."""
@@ -305,7 +282,6 @@ class Manager():
             print(border)
             print(row.format(id=id, name=name, desc=desc, status=status))
         print(border)
-        pass
 
     def run_job(self, id, *args):
         """Run one chosen job."""
@@ -381,56 +357,34 @@ class Manager():
             clean = input(f'Clean file {path}? [Y] ')
             if clean == 'Y':
                 open(path, 'w').close()
-        pass
 
     def cancel_job(self, id):
         """Cancel one chosen job runs."""
         id = self._check_id(id)
         repr = f'Job[{id}]'
         print(f'You are trying to cancel all {repr} runs...')
-        sure = self.sure
-        if sure is False:
-            while True:
-                sure = input(f'Are you sure? [Y/n] ')
-                if sure in ('Y', 'n'):
-                    sure = True if sure == 'Y' else False
-                    break
-        if sure is True:
+        sure = self.sure or self._are_you_sure()
+        if sure:
             self.driver.cancel_job(id)
             print(f'All {repr} runs canceled.')
-        pass
 
     def cancel_jobs(self):
         """Cancel all currently running jobs."""
         print(f'You are trying to cancel all currently running jobs...')
-        sure = self.sure
-        if sure is False:
-            while True:
-                sure = input(f'Are you sure? [Y/n] ')
-                if sure in ('Y', 'n'):
-                    sure = True if sure == 'Y' else False
-                    break
-        if sure is True:
+        sure = self.sure or self._are_you_sure()
+        if sure:
             self.driver.cancel_jobs()
             print(f'All jobs canceled.')
-        pass
 
     def cancel_run(self, id):
         """Cancel run using its ID."""
         id = self._check_id(id)
         repr = f'Run[{id}]'
         print(f'You are trying to cancel {repr}...')
-        sure = self.sure
-        if sure is False:
-            while True:
-                sure = input(f'Are you sure? [Y/n] ')
-                if sure in ('Y', 'n'):
-                    sure = True if sure == 'Y' else False
-                    break
-        if sure is True:
+        sure = self.sure or self._are_you_sure()
+        if sure:
             self.driver.cancel_run(id)
             print(f'{repr} canceled.')
-        pass
 
     def deactivate_run(self, id):
         """Deactivate run using its ID."""
@@ -469,40 +423,26 @@ class Manager():
             proc.wait()
         else:
             print(f'File {path} does not exists.')
-        pass
 
     def create_repo(self):
         """Create job repository and publish it by URL."""
         url = input('Please give remote Git repository URL: ')
-        if self.sure is False:
-            while True:
-                sure = input(f'Are you sure? [Y/n] ')
-                if sure in ('Y', 'n'):
-                    sure = True if sure == 'Y' else False
-                    break
-        if sure is True:
+        sure = self.sure or self._are_you_sure()
+        if sure:
             self.driver.create_repo(url=url)
             print('Job repository successfully created.')
-        pass
 
     def sync_repo(self, id=None):
         """Synchronize job repository."""
         print('You are trying to synchronize job repository...')
-        sure = self.sure
-        if sure is False:
-            while True:
-                sure = input(f'Are you sure? [Y/n] ')
-                if sure in ('Y', 'n'):
-                    sure = True if sure == 'Y' else False
-                    break
-        if sure is True:
+        sure = self.sure or self._are_you_sure()
+        if sure:
             self.driver.pull_repo()
             kwargs = {}
             if id is not None:
                 kwargs['id'] = int(id)
             self.driver.push_repo(**kwargs)
             print('Job repository successfully synchronized.')
-        pass
 
     def _parse_arguments(self):
         parser = argparse.ArgumentParser()
