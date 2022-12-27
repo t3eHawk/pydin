@@ -1115,6 +1115,8 @@ class Job():
                 self.status = result.status
                 self.reruns = result.rerun_times
                 self.seqno = result.rerun_seqno
+                self.initiator_id = result.rerun_id
+                self.trigger_id = result.trigger_id
                 if result.data_dump:
                     self.data = pickle.loads(result.data_dump)
                 else:
@@ -1132,16 +1134,14 @@ class Job():
             self.status = None
             self.reruns = None
             self.seqno = None
+            self.initiator_id = None
+            self.trigger_id = coalesce(args.trigger, trigger_id)
             self.data = types.SimpleNamespace()
         self.errors = set()
 
         self.recycle_ind = 'Y' if self.args.recycle else None
-
-        self.trigger_id = args.trigger or trigger_id
-        self.trigger = db.record(history, self.trigger_id)
-
-        self.initiator_id = None
         self.initiator = db.record(history, self.initiator_id)
+        self.trigger = db.record(history, self.trigger_id)
 
         # Configure dependent objects.
         email_list = coalesce(email_list, schedule['email_list'])
