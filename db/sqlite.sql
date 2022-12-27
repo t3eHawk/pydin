@@ -96,6 +96,10 @@ create table pd_task_history (
   records_written   integer,
   records_processed integer,
   records_error     integer,
+  files_read        integer,
+  files_written     integer,
+  volume_read       integer,
+  volume_written    integer,
   result_value      integer,
   result_long       text,
   updated           text
@@ -119,6 +123,10 @@ create table pd_step_history (
   records_written   integer,
   records_processed integer,
   records_error     integer,
+  files_read        integer,
+  files_written     integer,
+  volume_read       integer,
+  volume_written    integer,
   result_value      integer,
   result_long       text,
   updated           text
