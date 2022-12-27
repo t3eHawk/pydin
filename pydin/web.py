@@ -239,18 +239,29 @@ def run_job():
     request = flask.request
     id = request.args.get('id')
     if id is not None and id.isdigit():
-        process = request.args.get('process')
+        tag = request.args.get('tag')
         date = request.args.get('date')
+        record_id = request.args.get('process')
+        trigger_id = request.args.get('trigger')
         recycle = json.loads(request.args.get('recycle', 'false'))
+        debug = json.loads(request.args.get('debug', 'false'))
+        solo = json.loads(request.args.get('solo', 'false'))
         wait = json.loads(request.args.get('wait', 'false'))
         kwargs = {}
-        if process or date:
-            k = 'process' if process else 'date'
-            v = int(process) if process else dt.datetime.fromisoformat(date)
-            kwargs[k] = v
+        if tag:
+            kwargs['tag'] = int(tag)
+        elif date:
+            kwargs['date'] = dt.datetime.fromisoformat(date)
+        elif record_id:
+            kwargs['record_id'] = int(record_id)
+        elif trigger_id:
+            kwargs['trigger_id'] = int(trigger_id)
+        kwargs['recycle'] = recycle
+        kwargs['debug'] = debug
+        kwargs['solo'] = solo
         driver = Driver(root=root)
-        proc = driver.run_job(id, recycle=recycle, wait=wait, **kwargs)
-        if wait is True:
+        proc = driver.run_job(id, wait=wait, **kwargs)
+        if wait:
             proc.wait()
             if proc.returncode > 0:
                 return SERVER_ERROR

@@ -316,44 +316,39 @@ class Manager():
         key = args[0] if ln > 1 and args[0] in keys else None
         value = args[1] if ln > 1 and key is not None else None
         kwargs = {}
-        if key is not None and value is not None:
-            if key in ('tag', 'process', 'trigger'):
-                value = int(value)
-            elif key == 'date':
-                value = dt.datetime.fromisoformat(value)
-            kwargs[key] = value
-        else:
+        if key is None:
             now = dt.datetime.now()
             timestamp = int(now.timestamp())
+            print(f'You are trying to start {repr} for current date...')
             kwargs['tag'] = timestamp
+        elif key == 'tag':
+            tag = int(value)
+            print(f'You are trying to start {repr} using timestamp {tag}...')
+            kwargs['tag'] = tag
+        elif key == 'date':
+            date = dt.datetime.fromisoformat(value)
+            print(f'You are trying to start {repr} using date {date}...')
+            kwargs['date'] = date
+        elif key == 'process':
+            record_id = int(value)
+            print(f'You are trying to start {repr} as Run[{record_id}]...')
+            kwargs['record_id'] = record_id
+        elif key == 'trigger':
+            trigger_id = int(value)
+            print(f'You are trying to trig {repr} from Run[{trigger_id}]...')
+            kwargs['trigger_id'] = trigger_id
         kwargs['recycle'] = True if 'recycle' in args else None
         kwargs['debug'] = True if 'debug' in args else None
         kwargs['noalarm'] = False if 'noalarm' in args else None
         kwargs['solo'] = True if 'solo' in args else None
 
-        if key is None:
-            print(f'You are trying to start {repr} for current date...')
-        elif key == 'tag':
-            print(f'You are trying to start {repr} using timestamp {value}...')
-        elif key == 'date':
-            print(f'You are trying to start {repr} using date {value}...')
-        elif key == 'process':
-            print(f'You are trying to start {repr} as Run[{value}]...')
-        elif key == 'trigger':
-            print(f'You are trying to trig {repr} from Run[{value}]...')
-        sure = self.sure
-        if sure is False:
-            while True:
-                sure = input('Are you sure? [Y/n] ')
-                if sure in ('Y', 'n'):
-                    sure = True if sure == 'Y' else False
-                    break
-        if sure is True:
+        sure = self.sure or self._are_you_sure()
+        if sure:
             proc = self.driver.run_job(id, wait=False, **kwargs)
             now = dt.datetime.now()
             date = '%Y-%m-%d %H:%M:%S'
-            print(f'{repr} started (PID {proc.pid}, {now:{date}}).')
-            if self.wait is True:
+            print(f'{repr} started on PID {proc.pid}, {now:{date}}.')
+            if self.wait:
                 print(f'Waiting for {repr} to finish...')
                 try:
                     proc.wait()
@@ -370,7 +365,6 @@ class Manager():
                         print(f'{repr} completed, {now:{date}}.')
                         if self.output is True:
                             print(proc.stdout.read().decode())
-        pass
 
     def run_jobs(self, path=None):
         """Run many jobs."""

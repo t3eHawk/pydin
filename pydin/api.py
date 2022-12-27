@@ -342,7 +342,7 @@ class Driver():
             yield dict(row)
         logger.debug('Jobs listed')
 
-    def run_job(self, id, tag=None, date=None, process=None, trigger=None,
+    def run_job(self, id, tag=None, date=None, record_id=None, trigger_id=None,
                 recycle=None, debug=None, noalarm=None, solo=None, wait=True):
         """Run particular job."""
         repr = f'Job[{id}]'
@@ -358,8 +358,8 @@ class Driver():
         args += ' run'
         args_dict = {'tag': tag,
                      'date': date.isoformat() if date is not None else None,
-                     'record': process,
-                     'trigger': trigger,
+                     'record': record_id,
+                     'trigger': trigger_id,
                      'recycle': '' if recycle is True else None,
                      'debug': '' if debug is True else None,
                      'noalarm': '' if noalarm is False else None,
