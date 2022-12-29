@@ -153,8 +153,8 @@ class Driver():
                    hour=None, min=None, sec=None, wday=None, yday=None,
                    trig=None, start_date=None, end_date=None,
                    env=None, args=None, timeout=None, parallelism=None,
-                   rerun_limit=None, rerun_days=None,
-                   sleep_period=None, wake_up_period=None,
+                   rerun_interval=None, rerun_limit=None, rerun_days=None,
+                   rerun_period=None, sleep_period=None, wake_up_period=None,
                    alarm=None, email_list=None, debug=None, norepo=False):
         """Create job with all necessary elements."""
         logger.debug('Creating job...')
@@ -174,8 +174,10 @@ class Driver():
                               arguments=args,
                               timeout=timeout,
                               parallelism=parallelism,
+                              rerun_interval=rerun_interval,
                               rerun_limit=rerun_limit,
                               rerun_days=rerun_days,
+                              rerun_period=rerun_period,
                               sleep_period=sleep_period,
                               wake_up_period=wake_up_period,
                               alarm=alarm,
