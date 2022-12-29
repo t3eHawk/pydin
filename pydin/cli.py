@@ -567,6 +567,17 @@ class Manager():
                 parallelism = 'N' if parallelism == '1' else parallelism
             else:
                 parallelism = to_none(parallelism)
+
+        print()
+        rerun_interval = input('Interval between reruns [1...n] ') or None
+        if isinstance(rerun_interval, str):
+            if rerun_interval.isdigit() or rerun_interval == '-':
+                if rerun_interval.isdigit():
+                    rerun_interval = int(rerun_interval)
+                else:
+                    rerun_interval = db.null
+            else:
+                rerun_interval = to_none(rerun_interval)
         rerun_limit = input('Limit of reruns number [1...n] ') or None
         if isinstance(rerun_limit, str):
             if rerun_limit.isdigit() or rerun_limit == '-':
@@ -585,6 +596,12 @@ class Manager():
                     rerun_days = db.null
             else:
                 rerun_days = to_none(rerun_days)
+        rerun_period = input('Minutes of rerun window [0-59] ') or None
+        if isinstance(rerun_period, str):
+            if rerun_period == '-':
+                rerun_period = db.null
+
+        print()
         sleep_period = input('Hours of sleep window [0-23] ') or None
         if isinstance(sleep_period, str):
             if sleep_period == '-':
@@ -614,8 +631,10 @@ class Manager():
                   'end_date': end_date,
                   'timeout': timeout,
                   'parallelism': parallelism,
+                  'rerun_interval': rerun_interval,
                   'rerun_limit': rerun_limit,
                   'rerun_days': rerun_days,
+                  'rerun_period': rerun_period,
                   'sleep_period': sleep_period,
                   'wake_up_period': wake_up_period,
                   'alarm': alarm,

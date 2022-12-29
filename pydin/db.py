@@ -155,8 +155,8 @@ class Database(pe.Database):
                   start_date=None, end_date=None,
                   environment=None, arguments=None,
                   timeout=None, parallelism=None,
-                  rerun_limit=None, rerun_days=None,
-                  sleep_period=None, wake_up_period=None,
+                  rerun_interval=None, rerun_limit=None, rerun_days=None,
+                  rerun_period=None, sleep_period=None, wake_up_period=None,
                   alarm=None, email_list=None, debug=None):
         """Normalize parameters in accordance with their data types."""
         values = {}
@@ -193,10 +193,14 @@ class Database(pe.Database):
                   'types': (int,)},
                  {'column': 'parallelism', 'value': parallelism,
                   'types': (int, str)},
+                 {'column': 'rerun_interval', 'value': rerun_interval,
+                  'types': (int,)},
                  {'column': 'rerun_limit', 'value': rerun_limit,
                   'types': (int,)},
                  {'column': 'rerun_days', 'value': rerun_days,
                   'types': (int,)},
+                 {'column': 'rerun_period', 'value': rerun_period,
+                  'types': (int, str)},
                  {'column': 'sleep_period', 'value': sleep_period,
                   'types': (int, str)},
                  {'column': 'wake_up_period', 'value': wake_up_period,
