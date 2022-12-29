@@ -399,52 +399,6 @@ class Scheduler():
             else:
                 return False
 
-        def is_sleeping(self):
-            """Check if the sleep window is currently active."""
-            return self.was_sleeping(self.scheduler.moment)
-
-        def was_sleeping(self, timestamp):
-            """Check if the sleep window was active at a timestamp."""
-            if self.sleep_period:
-                s = self.scheduler.parser(timestamp)
-                if self.scheduler.matcher(self.sleep_period, s.hour):
-                    return True
-                else:
-                    if self.wake_up_period:
-                        if self.scheduler.matcher(self.wake_up_period, s.min):
-                            return False
-                        else:
-                            return True
-                    else:
-                        return False
-            else:
-                return False
-
-        def is_waiting(self):
-            """Check if this job has to wait."""
-            if self.scheduler.waiting_lists.get(self.id):
-                return True
-            else:
-                return False
-
-        def is_busy(self):
-            """Check if the given scheduler is free to run this job."""
-            if self.parallelism:
-                parameter = self.parallelism
-                limit = case(parameter, 'Y', 999, 'N', 1, parameter)
-                if isinstance(limit, str):
-                    if limit.isdigit():
-                        limit = int(limit)
-                    else:
-                        limit = 1
-                if isinstance(limit, int):
-                    if self.scheduler.count_running(self.id) >= limit:
-                        return True
-                    else:
-                        return False
-            else:
-                return False
-
         def is_ready(self):
             """Check if this job is ready for run or rerun."""
             if (
@@ -466,6 +420,28 @@ class Scheduler():
             else:
                 return False
 
+        def is_busy(self):
+            """Check if the given scheduler is free to run this job."""
+            if self.parallelism:
+                parameter = self.parallelism
+                limit = case(parameter, 'Y', 999, 'N', 1, parameter)
+                if isinstance(limit, str):
+                    limit = int(limit) if limit.isdigit() else 1
+                if isinstance(limit, int):
+                    if self.scheduler.count_running(self.id) >= limit:
+                        return True
+                    else:
+                        return False
+            else:
+                return False
+
+        def is_waiting(self):
+            """Check if this job has to wait."""
+            if self.scheduler.waiting_lists.get(self.id):
+                return True
+            else:
+                return False
+
         def is_rerun_time(self):
             """Check if rerun time has come."""
             return self.was_rerun_time(self.scheduler.moment)
@@ -473,14 +449,9 @@ class Scheduler():
         def was_rerun_time(self, timestamp):
             """Check if rerun time had came at a timestamp."""
             if self.rerun_interval and timestamp % self.rerun_interval == 0:
-                s = self.scheduler.parser(timestamp)
-                if self.rerun_period:
-                    if self.scheduler.matcher(self.rerun_period, s.min):
-                        return True
-                    else:
-                        return False
-                else:
-                    return True
+                return True
+            else:
+                return False
 
         def is_rerun_available(self):
             """Check if rerun is currently available."""
@@ -504,6 +475,51 @@ class Scheduler():
                     return False
             else:
                 return False
+
+        def is_sleeping(self):
+            """Check if the sleep window is currently active."""
+            return self.was_sleeping(self.scheduler.moment)
+
+        def was_sleeping(self, timestamp):
+            """Check if the sleep window was active at a timestamp."""
+            if self.sleep_period:
+                s = self.scheduler.parser(timestamp)
+                if self.scheduler.matcher(self.sleep_period, s.hour):
+                    return True
+                else:
+                    return False
+            else:
+                return False
+
+        def is_awakening(self):
+            """Check if the wake up window is currently active."""
+            return self.was_awakening(self.scheduler.moment)
+
+        def was_awakening(self, timestamp):
+            """Check if the wake up window was active at a timestamp."""
+            if self.wake_up_period:
+                s = self.scheduler.parser(timestamp)
+                if self.scheduler.matcher(self.wake_up_period, s.min):
+                    return True
+                else:
+                    return False
+            else:
+                return True
+
+        def is_restarting(self):
+            """Check if the rerun window is currently active."""
+            return self.was_restarting(self.scheduler.moment)
+
+        def was_restarting(self, timestamp):
+            """Check if the rerun window was active at a timestamp."""
+            if self.rerun_period:
+                s = self.scheduler.parser(timestamp)
+                if self.scheduler.matcher(self.rerun_period, s.min):
+                    return True
+                else:
+                    return False
+            else:
+                return True
 
         pass
 
@@ -631,7 +647,8 @@ class Scheduler():
                   where(sa.and_(h.c.status.in_(['E', 'T']),
                                 h.c.rerun_id.is_(None),
                                 h.c.rerun_now.is_(None),
-                                h.c.rerun_done.is_(None))).
+                                h.c.rerun_done.is_(None),
+                                h.c.deactivated.is_(None))).
                   order_by(h.c.id))
         conn = db.connect()
         result = conn.execute(select).fetchall()
@@ -656,7 +673,7 @@ class Scheduler():
                              h.c.rerun_times, s.c.rerun_limit, s.c.rerun_days,
                              h.c.rerun_done, h.c.deactivated]).
                   select_from(sa.join(h, s, h.c.job_id == s.c.id)).
-                  where(sa.and_(h.c.status == 'W')).
+                  where(sa.and_(h.c.status == 'W', h.c.deactivated.is_(None))).
                   order_by(h.c.id))
         conn = db.connect()
         result = conn.execute(select).fetchall()
@@ -1072,15 +1089,18 @@ class Scheduler():
             job.refresh_process()
             logger.debug(f'Checking {job} for rerun using {job.config}')
             if not job.done and not job.deactivated:
-                if job.was_active(tag) and job.is_ready():
-                    logger.debug(f'{job} is ready for rerun')
-                    logger.info(f'Adding {job} to the queue for rerun...')
-                    job.check_in()
-                    self.queue.put((job, tag))
-                    logger.info(f'{job} added to the queue for rerun')
-                    self.failure_lists[job.id].pop(job.record_id)
+                if job.is_restarting():
+                    if job.was_active(tag) and job.is_ready():
+                        logger.debug(f'{job} is ready for rerun')
+                        logger.info(f'Adding {job} to the queue for rerun...')
+                        job.check_in()
+                        self.queue.put((job, tag))
+                        logger.info(f'{job} added to the queue for rerun')
+                        self.failure_lists[job.id].pop(job.record_id)
+                    else:
+                        logger.debug(f'{job} is not ready for rerun')
                 else:
-                    logger.debug(f'{job} is not ready for rerun')
+                    logger.debug(f'{job} is out of rerun window')
             else:
                 logger.debug(f'{job} rerun already done or deactivated')
                 self.failure_lists[job.id].pop(job.record_id)
@@ -1090,13 +1110,23 @@ class Scheduler():
     def _regain_sleeping_job(self, job: Job, tag: int):
         try:
             job.refresh_config()
+            job.refresh_process()
             logger.debug(f'Checking {job} for awake using {job.config}')
-            if job.is_awaken():
-                logger.debug(f'{job} is ready to awake')
-                logger.info(f'Adding {job} to the queue from sleep...')
-                job.check_in()
-                self.queue.put((job, tag))
-                logger.info(f'{job} added to the queue from sleep')
+            if not job.deactivated:
+                if job.is_awakening():
+                    if job.was_active(tag) and job.is_awaken():
+                        logger.debug(f'{job} is ready to awake')
+                        logger.info(f'Adding {job} to the queue from sleep...')
+                        job.check_in()
+                        self.queue.put((job, tag))
+                        logger.info(f'{job} added to the queue from sleep')
+                        self.waiting_lists[job.id].pop(job.record_id)
+                    else:
+                        logger.debug(f'{job} is not ready to awake')
+                else:
+                    logger.debug(f'{job} is out of wake up window')
+            else:
+                logger.debug(f'{job} cannot awake because deactivated')
                 self.waiting_lists[job.id].pop(job.record_id)
         except Exception:
             logger.error()
