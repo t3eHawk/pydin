@@ -2093,6 +2093,10 @@ class Task(Process):
         self._records_written = 0
         self._records_processed = 0
         self._records_error = 0
+        self._files_read = 0
+        self._files_written = 0
+        self._bytes_read = 0
+        self._bytes_written = 0
         self._result_value = 0
         self._result_long = 0
         self.errors = set()
@@ -2204,6 +2208,50 @@ class Task(Process):
             self._records_error += value
             self.logger.table(records_error=self.records_error)
         pass
+
+    @property
+    def files_read(self):
+        """Get number of files read."""
+        return self._files_read
+
+    @files_read.setter
+    def files_read(self, value):
+        if isinstance(value, int):
+            self._files_read += value
+            self.logger.table(files_read=self.files_read)
+
+    @property
+    def files_written(self):
+        """Get number of files written."""
+        return self._files_written
+
+    @files_written.setter
+    def files_written(self, value):
+        if isinstance(value, int):
+            self._files_written += value
+            self.logger.table(files_written=self.files_written)
+
+    @property
+    def bytes_read(self):
+        """Get number of bytes read."""
+        return self._bytes_read
+
+    @bytes_read.setter
+    def bytes_read(self, value):
+        if isinstance(value, int):
+            self._bytes_read += value
+            self.logger.table(bytes_read=self.bytes_read)
+
+    @property
+    def bytes_written(self):
+        """Get number of bytes written."""
+        return self._bytes_written
+
+    @bytes_written.setter
+    def bytes_written(self, value):
+        if isinstance(value, int):
+            self._bytes_written += value
+            self.logger.table(bytes_written=self.bytes_written)
 
     @property
     def result_value(self):
@@ -2413,6 +2461,10 @@ class Step(Process, Unit):
         self._records_written = 0
         self._records_processed = 0
         self._records_error = 0
+        self._files_read = 0
+        self._files_written = 0
+        self._bytes_read = 0
+        self._bytes_written = 0
         self._result_value = 0
         self._result_long = 0
         self.errors = set()
@@ -2576,12 +2628,59 @@ class Step(Process, Unit):
 
     @records_error.setter
     def records_error(self, value):
-        print('Hello there!')
         if isinstance(value, int):
             self._records_error += value
             self.task.records_error = value
             self.logger.table(records_error=self.records_error)
         pass
+
+    @property
+    def files_read(self):
+        """Get number of files read."""
+        return self._files_read
+
+    @files_read.setter
+    def files_read(self, value):
+        if isinstance(value, int):
+            self._files_read += value
+            self.task.files_read = value
+            self.logger.table(files_read=self.files_read)
+
+    @property
+    def files_written(self):
+        """Get number of files written."""
+        return self._files_written
+
+    @files_written.setter
+    def files_written(self, value):
+        if isinstance(value, int):
+            self._files_written += value
+            self.task.files_written = value
+            self.logger.table(files_written=self.files_written)
+
+    @property
+    def bytes_read(self):
+        """Get number of bytes read."""
+        return self._bytes_read
+
+    @bytes_read.setter
+    def bytes_read(self, value):
+        if isinstance(value, int):
+            self._bytes_read += value
+            self.task.bytes_read = value
+            self.logger.table(bytes_read=self.bytes_read)
+
+    @property
+    def bytes_written(self):
+        """Get number of bytes written."""
+        return self._bytes_written
+
+    @bytes_written.setter
+    def bytes_written(self, value):
+        if isinstance(value, int):
+            self._bytes_written += value
+            self.task.bytes_written = value
+            self.logger.table(bytes_written=self.bytes_written)
 
     @property
     def result_value(self):
