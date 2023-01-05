@@ -1758,17 +1758,26 @@ class Job():
         pass
 
     def _trig(self):
-        if self.status == 'D' and self.solo is False:
-            logger.debug(f'{self} requesting other jobs to trigger...')
-            time = tm.time()
+        if self.status == 'D' and not self.solo:
+            logger.debug(f'{self} checking for child jobs...')
+            timestamp = tm.time()
+            trigger_id = self.id
+            trigger_list = f'%;{trigger_id};%'
+
             conn = db.connect()
             table = db.tables.schedule
-            select = table.select().where(table.c.trigger_id == self.id)
+            select = table.select().where(
+                sa.or_(
+                    table.c.trigger_id == trigger_id,
+                    (';'+table.c.trigger_list+';').like(trigger_list)
+                )
+            )
             result = conn.execute(select).fetchall()
+
             total = len(result)
             if total > 0:
-                logger.debug(f'{self} found {total} potential jobs to trigger')
-                logger.info(f'{self} triggering other jobs...')
+                logger.debug(f'{self} found {total} child jobs to trigger')
+                logger.info(f'{self} triggering child jobs...')
                 for row in result:
                     try:
                         id = row.id
@@ -1776,12 +1785,10 @@ class Job():
                         trigger_id = self.record_id
                         repr = f'Job[{id}:{tag}]'
                         status = True if row.status == 'Y' else False
-                        start = to_timestamp(row.start_date) or time-1
-                        end = to_timestamp(row.end_date) or time+1
-                        if status is False or time > end or time < start:
-                            logger.debug(f'{repr} will be skipped '
-                                         'due to one of the parameters: '
-                                         f'{status=}, {start=}, {end=}')
+                        start = to_timestamp(row.start_date) or timestamp-1
+                        end = to_timestamp(row.end_date) or timestamp+1
+                        if not status or timestamp > end or timestamp < start:
+                            logger.debug(f'{repr} is not active job')
                             continue
                         logger.info(f'{repr} will be triggered')
 
@@ -1795,14 +1802,17 @@ class Job():
                         logger.info(f'{repr} runs on PID {proc.pid}')
                     except Exception:
                         logger.error()
-                logger.info(f'{self} other jobs triggered')
+                logger.info(f'{self} child jobs triggered')
             else:
-                logger.debug(f'{self} no other jobs triggered')
-        else:
-            logger.debug('Trigger is not required '
-                         'due to one of the parameters: '
-                         f'status={self.status}, solo={self.solo}')
-        pass
+                logger.debug(f'{self} no child jobs found')
+        elif self.status != 'D':
+            logger.debug(f'{self} child jobs were not triggered because of '
+                          'the parent job unsuccessful completion')
+        elif self.solo:
+            logger.debug(f'{self} child jobs were not triggered because of '
+                          'the solo parent job run')
+
+    pass
 
 
 class Pipeline():

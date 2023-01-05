@@ -15,6 +15,7 @@ create table pd_schedule (
   weekday         text,
   yearday         text,
   trigger_id      integer,
+  trigger_list    text,
   start_date      text,
   end_date        text,
   environment     text,

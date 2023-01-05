@@ -15,6 +15,7 @@ create table pd_schedule (
   weekday         varchar2(100 char),
   yearday         varchar2(100 char),
   trigger_id      number(*, 0),
+  trigger_list    varchar2(100 char),
   start_date      date,
   end_date        date,
   environment     varchar2(50 char),
