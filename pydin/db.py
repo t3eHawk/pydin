@@ -36,15 +36,14 @@ class Database(pe.Database):
         def __init__(self, database):
             self.database = database
             self.schedule = self.load('pd_schedule')
-            self.components = self.load('pd_components')
+            self.pipeline_config = self.load('pd_pipeline_config')
+            self.node_config = self.load('pd_node_config')
             self.run_history = self.load('pd_run_history')
             self.task_history = self.load('pd_task_history')
             self.step_history = self.load('pd_step_history')
             self.sql_log = self.load('pd_sql_log')
             self.file_log = self.load('pd_file_log')
-            self.config = self.load('pd_config')
-            self.pipelines = self.load('pd_pipelines')
-            pass
+            self.components = self.load('pd_components')
 
         def load(self, table_name=None):
             if table_name:

@@ -49,6 +49,43 @@ begin
    where id = new.id;
 end;
 
+create table pd_pipeline_config (
+  job_id        integer not null,
+  pipeline_id   integer primary key autoincrement,
+  pipeline_name text,
+  pipeline_desc text,
+  error_limit   integer default 1,
+  sql_logging   text default 'Y',
+  file_logging  text default 'Y',
+  status        text default 'Y'
+  unique(job_id)
+);
+
+create table pd_node_config (
+  job_id       integer not null,
+  pipeline_id  integer not null,
+  node_id      integer primary key autoincrement,
+  node_seqno   integer not null,
+  node_name    text,
+  node_desc    text,
+  node_type    text not null,
+  node_config  text,
+  source_name  text not null,
+  custom_query text,
+  date_field   text,
+  days_back    integer,
+  hours_back   integer,
+  months_back  integer,
+  timezone     text,
+  value_field  text,
+  key_field    text,
+  chunk_size   integer default 1000,
+  cleanup      text,
+  input_list   text,
+  output_list  text
+  unique(job_id, pipeline_id, node_seqno)
+);
+
 create table pd_run_history (
   id          integer primary key autoincrement,
   job_id      integer,
@@ -180,40 +217,6 @@ create table pd_components (
   status      text
 );
 
-insert into pd_components (id) values ('SCHEDULER');
-insert into pd_components (id) values ('RESTAPI');
+insert into pd_components(id) values ('SCHEDULER');
+insert into pd_components(id) values ('RESTAPI');
 commit;
-
-create table pd_pipelines (
-  job_id        integer not null,
-  pipeline_id   integer primary key autoincrement,
-  pipeline_name text,
-  pipeline_desc text,
-  error_limit   integer default 1,
-  sql_logging   text default 'Y',
-  file_logging  text default 'Y',
-  unique(job_id)
-);
-
-create table pd_config (
-  job_id       integer not null,
-  pipeline_id  integer,
-  node_id      integer primary key autoincrement,
-  node_seqno   integer not null,
-  node_name    text,
-  node_desc    text,
-  node_type    text not null,
-  node_config  text,
-  source_name  text not null,
-  custom_query text,
-  date_field   text,
-  days_back    integer,
-  hours_back   integer,
-  months_back  integer,
-  timezone     text,
-  value_field  text,
-  key_field    text,
-  chunk_size   integer default 1000,
-  cleanup      text,
-  unique(job_id, node_seqno)
-);

@@ -65,6 +65,67 @@ begin
 end;
 /
 
+create table pd_pipeline_config (
+  job_id        number(*, 0) not null,
+  pipeline_id   number(*, 0),
+  pipeline_name varchar2(50 char),
+  pipeline_desc varchar2(200 char),
+  error_limit   number(*, 0) default 1,
+  sql_logging   varchar2(1 char) default 'Y',
+  file_logging  varchar2(1 char) default 'Y',
+  status        varchar2(1 char) default 'Y'
+);
+
+create sequence pd_pipeline_config_seq
+increment by 1
+start with 1
+nocache;
+
+create or replace trigger pd_pipeline_config_id_trg
+before insert on pd_pipeline_config
+for each row
+begin
+  select pd_pipeline_config_seq.nextval into :new.pipeline_id from dual;
+end;
+/
+
+create table pd_node_config (
+  job_id       number(*, 0) not null,
+  pipeline_id  number(*, 0) not null,
+  node_id      number(*, 0),
+  node_seqno   number(*, 0) not null,
+  node_name    varchar2(50 char),
+  node_desc    varchar2(200 char),
+  node_type    varchar2(50 char) not null,
+  node_config  clob,
+  source_name  varchar2(50 char) not null,
+  custom_query clob,
+  date_field   varchar2(50 char),
+  days_back    number(*, 0),
+  hours_back   number(*, 0),
+  months_back  number(*, 0),
+  timezone     varchar2(50 char),
+  value_field  varchar2(50 char),
+  key_field    varchar2(50 char),
+  chunk_size   number(*, 0) default 1000,
+  cleanup      varchar2(1 char),
+  input_list   varchar2(100 char),
+  output_list  varchar2(100 char)
+);
+
+create sequence pd_node_config_seq
+increment by 1
+start with 1
+nocache;
+
+create or replace trigger pd_node_config_id_trg
+before insert on pd_node_config
+for each row
+begin
+  select pd_node_config_seq.nextval into :new.node_id from dual;
+end;
+/
+
 create table pd_run_history (
   id          number(*, 0),
   job_id      number(*, 0),
@@ -267,64 +328,6 @@ create table pd_components (
   constraint pd_components_pk primary key (id)
 );
 
-insert into pd_components (id) values ('SCHEDULER');
-insert into pd_components (id) values ('RESTAPI');
+insert into pd_components(id) values ('SCHEDULER');
+insert into pd_components(id) values ('RESTAPI');
 commit;
-
-create table pd_pipelines (
-  job_id        number(*, 0) not null,
-  pipeline_id   number(*, 0),
-  pipeline_name varchar2(50 char),
-  pipeline_desc varchar2(200 char),
-  error_limit   number(*, 0) default 1,
-  sql_logging   varchar2(1 char) default 'Y',
-  file_logging  varchar2(1 char) default 'Y'
-);
-
-create sequence pd_pipelines_seq
-increment by 1
-start with 1
-nocache;
-
-create or replace trigger pd_pipelines_id_trg
-before insert on pd_pipelines
-for each row
-begin
-  select pd_pipelines_seq.nextval into :new.pipeline_id from dual;
-end;
-/
-
-create table pd_config (
-  job_id       number(*, 0) not null,
-  pipeline_id  number(*, 0) not null,
-  node_id      number(*, 0),
-  node_seqno   number(*, 0) not null,
-  node_name    varchar2(50 char),
-  node_desc    varchar2(200 char),
-  node_type    varchar2(50 char) not null,
-  node_config  varchar2(4000 char),
-  source_name  varchar2(50 char) not null,
-  custom_query clob,
-  date_field   varchar2(50 char),
-  days_back    number(*, 0),
-  hours_back   number(*, 0),
-  months_back  number(*, 0),
-  timezone     varchar2(50 char),
-  value_field  varchar2(50 char),
-  key_field    varchar2(50 char),
-  chunk_size   number(*, 0) default 1000,
-  cleanup      varchar2(1 char)
-);
-
-create sequence pd_config_seq
-increment by 1
-start with 1
-nocache;
-
-create or replace trigger pd_config_id_trg
-before insert on pd_config
-for each row
-begin
-  select pd_config_seq.nextval into :new.node_id from dual;
-end;
-/
