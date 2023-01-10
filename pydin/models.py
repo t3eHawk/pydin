@@ -97,11 +97,11 @@ class Model(Node):
         if hasattr(self, 'date_field'):
             date = self.pipeline.calendar
 
-            if self.days_back:
+            if isinstance(self.days_back, int):
                 date = date.days_back(self.days_back)
-            elif self.hours_back:
+            elif isinstance(self.hours_back, int):
                 date = date.hours_back(self.hours_back)
-            elif self.months_back:
+            elif isinstance(self.months_back, int):
                 date = date.months_back(self.months_back)
 
             if self.timezone:
