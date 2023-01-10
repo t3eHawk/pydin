@@ -1293,7 +1293,6 @@ class Job():
             if act == 'run':
                 self.target = 'recycle' if self.args.recycle else 'run'
                 self.run()
-        pass
 
     def __repr__(self):
         """Represent this job as its ID and timestamp."""
@@ -1304,14 +1303,12 @@ class Job():
                 return f'Job[{self.id}:{self.tag}]'
             elif self.record_id is not None:
                 return f'Job[{self.id}:{self.tag}:{self.record_id}]'
-        pass
 
     @property
     def id(self):
         """."""
         if hasattr(self, '_id'):
             return self._id
-        pass
 
     @id.setter
     def id(self, value):
@@ -1326,14 +1323,12 @@ class Job():
         else:
             message = 'id cannot be redefined'
             raise AttributeError(message)
-        pass
 
     @property
     def tag(self):
         """."""
         if hasattr(self, '_tag'):
             return self._tag
-        pass
 
     @tag.setter
     def tag(self, value):
@@ -1346,14 +1341,12 @@ class Job():
             class_name = value.__class__.__name__
             message = f'tag must be {requires}, not {class_name}'
             raise ValueError(message)
-        pass
 
     @property
     def date(self):
         """."""
         if hasattr(self, '_date'):
             return self._date
-        pass
 
     @date.setter
     def date(self, value):
@@ -1364,7 +1357,6 @@ class Job():
             class_name = value.__class__.__name__
             message = f'date must be {requires}, not {class_name}'
             raise ValueError(message)
-        pass
 
     @property
     def record_id(self):
@@ -1378,7 +1370,6 @@ class Job():
         else:
             message = f'run ID must be int, not {value.__class__.__name__}'
             raise TypeError(message)
-        pass
 
     @property
     def duration(self):
@@ -1392,7 +1383,6 @@ class Job():
             return json.dumps(self.data, sort_keys=True)
         else:
             return None
-        pass
 
     @property
     def text_error(self):
@@ -1410,29 +1400,27 @@ class Job():
     @property
     def pipeline(self):
         """Build pipeline for this job if configured."""
-        if self.configured:
+        pipeline_settings = self.pipeline_settings
+        if self.pipeline_settings:
             nodes = []
             models = imp.import_module('pydin.models')
             fields = imp.import_module('pydin.fields')
-            for record in self.configuration:
-                source_name = record['source_name']
-                node_name = record['node_name']
-                node_type = record['node_type']
-                node_config = json.loads(record['node_config'])
-                custom_query = record['custom_query']
-
-                date_field = record['date_field']
-                days_back = record['days_back']
-                hours_back = record['hours_back']
-                months_back = record['months_back']
-                timezone = record['timezone']
-                value_field = record['value_field']
-
-                key_name = to_lower(record['key_field'])
+            for settings in self.node_settings:
+                source_name = settings['source_name']
+                node_name = settings['node_name']
+                node_type = settings['node_type']
+                node_config = json.loads(settings['node_config'])
+                custom_query = settings['custom_query']
+                date_field = settings['date_field']
+                days_back = settings['days_back']
+                hours_back = settings['hours_back']
+                months_back = settings['months_back']
+                timezone = settings['timezone']
+                value_field = settings['value_field']
+                key_name = to_lower(settings['key_field'])
                 key_field = getattr(fields, key_name) if key_name else None
-
-                chunk_size = record['chunk_size']
-                cleanup = to_boolean(record['cleanup'])
+                chunk_size = settings['chunk_size']
+                cleanup = to_boolean(settings['cleanup'])
 
                 constructor = getattr(models, node_type)
                 node = constructor(model_name=node_name,
@@ -1449,40 +1437,48 @@ class Job():
                                    cleanup=cleanup,
                                    **node_config)
                 nodes.append(node)
-            settings = self.settings
-            name = settings['pipeline_name']
-            error_limit = settings['error_limit']
-            sql_logging = to_boolean(settings['sql_logging'])
-            file_logging = to_boolean(settings['file_logging'])
+            name = pipeline_settings['pipeline_name']
+            error_limit = pipeline_settings['error_limit']
+            sql_logging = to_boolean(pipeline_settings['sql_logging'])
+            file_logging = to_boolean(pipeline_settings['file_logging'])
             logging = Logging(sql=sql_logging, file=file_logging)
             return Pipeline(*nodes, name=name, error_limit=error_limit,
                             logging=logging)
 
     @property
-    def settings(self):
-        """Get job pipeline settings."""
+    def pipeline_found(self):
+        """Check if the job has an active pipeline."""
+        settings = self.pipeline_settings
+        status = to_boolean(settings['status'])
+        if status:
+            settings = self.node_settings
+            if settings:
+                return True
+            else:
+                return False
+        else:
+            return False
+
+    @property
+    def pipeline_settings(self):
+        """Get pipeline settings."""
         conn = db.connect()
-        p = db.tables.pipelines
-        select = p.select().where(p.c.job_id == self.id)
+        pc = db.tables.pipeline_config
+        select = pc.select().where(pc.c.job_id == self.id)
         result = conn.execute(select).first()
         if result:
             return dict(result)
 
     @property
-    def configuration(self):
-        """Get job pipeline configuration."""
+    def node_settings(self):
+        """Get pipeline nodes settings."""
         conn = db.connect()
-        c = db.tables.config
-        select = c.select().where(c.c.job_id == self.id).\
-                            order_by(c.c.node_seqno)
+        nc = db.tables.node_config
+        select = nc.select().where(nc.c.job_id == self.id).\
+                             order_by(nc.c.node_seqno)
         result = conn.execute(select)
         if result:
             return [dict(record) for record in result]
-
-    @property
-    def configured(self):
-        """Check if job configured."""
-        return True if self.configuration else False
 
     @classmethod
     def get(cls):
@@ -1499,7 +1495,6 @@ class Job():
             return True
         else:
             return False
-        pass
 
     def run(self):
         """Run this particular job."""
@@ -1512,7 +1507,6 @@ class Job():
             self._fail()
         self._end()
         self._trig()
-        pass
 
     def store(self, **kwargs):
         """Store the given arguments in a special job namespace."""
@@ -1524,13 +1518,11 @@ class Job():
         name = f'name[{self.name}]'
         pid = f'PID[{self.pid}]'
         logger.info(f'{self} having {name} launched on {pid}')
-        pass
 
     def _prepare(self):
         logger.debug('Preparing to run this job...')
         self._set_signals()
         logger.debug('Preparation done')
-        pass
 
     def _start(self):
         logger.info(f'{self} starts...')
@@ -1566,7 +1558,6 @@ class Job():
         logger.info(f'{self} reports for date - {self.date}')
 
         logger.debug(f'{self} started')
-        pass
 
     def _start_as_new(self):
         logger.debug(f'{self} will be executed as totally new')
@@ -1587,7 +1578,6 @@ class Job():
                           recycle_ind=self.recycle_ind,
                           trigger_id=self.trigger_id,
                           file_log=self.file_log)
-        pass
 
     def _start_as_continue(self):
         logger.debug(f'{self} will be executed as continue')
@@ -1599,7 +1589,6 @@ class Job():
                           user_name=self.user_name,
                           pid=self.pid,
                           file_log=self.file_log)
-        pass
 
     def _start_as_rerun(self):
         logger.debug(f'{self} will be executed as rerun')
@@ -1624,25 +1613,22 @@ class Job():
                           trigger_id=self.trigger_id,
                           file_log=self.file_log)
         self.initiator.write(rerun_now='Y')
-        pass
 
     def _run(self):
         logger.info(f'{self} runs...')
         self.status = 'R'
         self.record.write(status=self.status)
-        if self.configured:
-            logger.debug(f'{self} pipeline now will be performed')
+        name = 'script'
+        path = os.path.join(self.path, 'script.py')
+        logger.debug(f'{self} script {path=} now will be executed')
+        spec = impu.spec_from_file_location(name, path)
+        module = impu.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        logger.debug(f'{self} script {path=} executed')
+        if self.pipeline_found:
+            logger.debug(f'{self} pipeline now will be build and performed')
             self.pipeline.run()
             logger.debug(f'{self} pipeline performed')
-        else:
-            name = 'script'
-            path = f'{self.path}/script.py'
-            logger.debug(f'{self} script {path=} now will be executed')
-            spec = impu.spec_from_file_location(name, path)
-            module = impu.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            logger.debug(f'{self} script {path=} executed')
-        pass
 
     def _fail(self):
         logger.error()
@@ -1650,7 +1636,6 @@ class Job():
 
     def __fail(self):
         self.errors.add(sys.exc_info())
-        pass
 
     def _end(self):
         logger.debug(f'{self} ends...')
@@ -1665,7 +1650,6 @@ class Job():
                                  rerun_now=None, rerun_done=rerun_done)
         logger.debug(f'{self} ended')
         logger.info(f'{self} duration {self.duration.seconds} seconds')
-        pass
 
     def _done(self):
         logger.info(f'{self} completed')
@@ -1732,7 +1716,6 @@ class Job():
     def _parse_file_log(self):
         if logger.file.status is True:
             return os.path.relpath(logger.file.path)
-        pass
 
     def _parse_email_list(self, email_list):
         email_list = email_list or []
@@ -1755,7 +1738,6 @@ class Job():
         logger.debug(f'SIGINT trigger set for current PID[{self.pid}]')
         signal.signal(signal.SIGTERM, self._shutdown)
         logger.debug(f'SIGTERM trigger set for current PID[{self.pid}]')
-        pass
 
     def _trig(self):
         if self.status == 'D' and not self.solo:
