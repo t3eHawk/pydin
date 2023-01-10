@@ -60,7 +60,6 @@ class Model(Node):
         self.chunk_size = chunk_size
         self.cleanup = cleanup
         self.configure(*args, **kwargs)
-        pass
 
     @property
     def model_name(self):
@@ -588,35 +587,32 @@ class Table(Extractable, Loadable, Model):
 class SQL(Executable, Model):
     """Represents SQL script as ETL model."""
 
-    def configure(self, text=None, file=None, parallel=False):
+    def configure(self, text=None, path=None, parallel=False):
         self.text = text
-        self.file = file
+        self.path = path
         self.parallel = parallel
-        pass
 
     @property
     def text(self):
         """Get raw SQL text."""
-        return self._text
+        return self.custom_query
 
     @text.setter
     def text(self, value):
         if isinstance(value, str):
-            self._text = to_sql(value)
-        pass
+            self.custom_query = value
 
     @property
-    def file(self):
+    def path(self):
         """Get path to file containing select SQL text."""
-        return self._file
+        return self._path
 
-    @file.setter
-    def file(self, value):
+    @path.setter
+    def path(self, value):
         if isinstance(value, str):
-            self._file = os.path.abspath(value)
-            if os.path.exists(self._file):
-                self.text = open(self.file, 'r').read()
-        pass
+            self._path = os.path.abspath(value)
+            if os.path.exists(self._path):
+                self.text = open(self.path, 'r').read()
 
     @property
     def query(self):
@@ -633,7 +629,6 @@ class SQL(Executable, Model):
     def parallel(self, value):
         if isinstance(value, (int, bool)):
             self._parallel = value
-        pass
 
     def parse(self):
         """Parse into SQL text object."""
@@ -680,38 +675,35 @@ class SQL(Executable, Model):
 class Select(Extractable, Model):
     """Represents SQL select as ETL model."""
 
-    def configure(self, text=None, file=None, columns=None, alias=None,
+    def configure(self, text=None, path=None, columns=None, alias=None,
                   parallel=False):
-        self.parallel = parallel
         self.text = text
-        self.file = file
+        self.path = path
         self.columns = columns
         self.alias = alias
-        pass
+        self.parallel = parallel
 
     @property
     def text(self):
         """Get raw SQL text."""
-        return self._text
+        return self.custom_query
 
     @text.setter
     def text(self, value):
         if isinstance(value, str):
-            self._text = to_sql(value)
-        pass
+            self.custom_query = value
 
     @property
-    def file(self):
+    def path(self):
         """Get path to file containing select SQL text."""
-        return self._file
+        return self._path
 
-    @file.setter
-    def file(self, value):
+    @path.setter
+    def path(self, value):
         if isinstance(value, str):
-            self._file = os.path.abspath(value)
-            if os.path.exists(self._file):
-                self.text = open(self.file, 'r').read()
-        pass
+            self._path = os.path.abspath(value)
+            if os.path.exists(self._path):
+                self.text = open(self.path, 'r').read()
 
     @property
     def columns(self):
@@ -723,7 +715,6 @@ class Select(Extractable, Model):
         if isinstance(value, list):
             if all([el for el in value if isinstance(el, str)]):
                 self._columns = value
-        pass
 
     @property
     def parallel(self):
@@ -734,13 +725,11 @@ class Select(Extractable, Model):
     def parallel(self, value):
         if isinstance(value, (int, bool)):
             self._parallel = value
-        pass
 
     @property
     def query(self):
         """Get foramtted SQL text object that can be executed in database."""
-        query = self.parse()
-        return query
+        return self.parse()
 
     @property
     def query_with_columns(self):
@@ -765,7 +754,6 @@ class Select(Extractable, Model):
     def fetch_size(self, value):
         if isinstance(value, int):
             self._fetch_size = value
-        pass
 
     def parse(self):
         """Parse into SQL text object."""
@@ -805,7 +793,6 @@ class Select(Extractable, Model):
                 yield [dict(record) for record in dataset]
             else:
                 break
-        pass
 
     def extract(self, step):
         """Extract data."""
@@ -845,7 +832,6 @@ class Insert(Executable, Model):
         self.select = select
         self.append = append
         self.parallel = parallel
-        pass
 
     def execute(self, step):
         """Perform the action of this node."""
@@ -885,7 +871,6 @@ class Insert(Executable, Model):
         self.logger = self.createlog()
         if self.cleanup is True:
             self.clean()
-        pass
 
     def clean(self):
         """Remove all data from table."""
@@ -894,7 +879,6 @@ class Insert(Executable, Model):
             self.truncate()
         else:
             self.delete()
-        pass
 
     @property
     def schema_name(self):
@@ -907,7 +891,6 @@ class Insert(Executable, Model):
             self._schema_name = value.lower()
         elif value is None:
             self._schema_name = None
-        pass
 
     @property
     def table_name(self):
@@ -920,7 +903,6 @@ class Insert(Executable, Model):
             self._table_name = value.lower()
         elif value is None:
             self._ta_table_nameble = None
-        pass
 
     @property
     def reference(self):
@@ -950,7 +932,6 @@ class Insert(Executable, Model):
     def append(self, value):
         if isinstance(value, (int, bool)) or value is None:
             self._append = value
-        pass
 
     @property
     def parallel(self):
@@ -961,7 +942,6 @@ class Insert(Executable, Model):
     def parallel(self, value):
         if isinstance(value, (int, bool)) or value is None:
             self._parallel = value
-        pass
 
     @property
     def select(self):
@@ -1043,7 +1023,6 @@ class Insert(Executable, Model):
         query = table.delete()
         result = conn.execute(query)
         logger.info(f'{result.rowcount} {self.table_name} records deleted')
-        pass
 
     def truncate(self):
         """Truncate table data."""
@@ -1051,7 +1030,6 @@ class Insert(Executable, Model):
         query = sa.text(f'truncate table {self.reference}')
         conn.execute(query)
         logger.info(f'Table {self.table_name} truncated')
-        pass
 
     def createlog(self):
         """Generate special logger."""
@@ -1070,7 +1048,6 @@ class Insert(Executable, Model):
                           query_type=self.__class__.__name__,
                           query_text=query_text,
                           start_date=dt.datetime.now())
-        pass
 
     def endlog(self, output_rows=None, output_text=None,
                 error_code=None, error_text=None):
@@ -1080,7 +1057,6 @@ class Insert(Executable, Model):
                           output_text=output_text,
                           error_code=error_code,
                           error_text=error_text)
-        pass
 
     def _format(self, text):
         text = text.format(**self.variables)
