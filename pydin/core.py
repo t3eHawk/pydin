@@ -1449,11 +1449,14 @@ class Job():
     def pipeline_found(self):
         """Check if the job has an active pipeline."""
         settings = self.pipeline_settings
-        status = to_boolean(settings['status'])
-        if status:
-            settings = self.node_settings
-            if settings:
-                return True
+        if settings:
+            status = to_boolean(settings['status'])
+            if status:
+                settings = self.node_settings
+                if settings:
+                    return True
+                else:
+                    return False
             else:
                 return False
         else:
@@ -1824,7 +1827,6 @@ class Pipeline():
 
         self.task.setup(self)
         self.add(*nodes)
-        pass
 
     def __repr__(self):
         """Represent pipeline with its name."""
@@ -1844,7 +1846,6 @@ class Pipeline():
             self._name = value
         else:
             self._name = None
-        pass
 
     @property
     def date(self):
@@ -1857,7 +1858,18 @@ class Pipeline():
             self._date = value
         else:
             self._date = dt.datetime.now()
-        pass
+
+    @property
+    def process_id(self):
+        """Get process ID."""
+        if self.job:
+            return self.job.record_id
+
+    @property
+    def trigger_id(self):
+        """Get trigger process ID."""
+        if self.job:
+            return self.job.trigger_id
 
     @property
     def order(self):
@@ -1919,7 +1931,6 @@ class Pipeline():
         """Walk through the pipeline plan step by step."""
         for step in self.steps.values():
             yield step
-        pass
 
     def run(self):
         """Run pipeline."""

@@ -156,6 +156,18 @@ class Model(Node):
             self._custom_query = None
 
     @property
+    def variables(self):
+        """Get list of available variables as a dictionary."""
+        data = {}
+        if self.pipeline:
+            data['pipeline'] = self.pipeline
+            data['calendar'] = self.pipeline.calendar
+            if self.job:
+                data['job'] = self.job
+                data['vars'] = self.job.data
+        return data
+
+    @property
     def recyclable(self):
         if hasattr(self, 'recycle'):
             return True
@@ -642,7 +654,7 @@ class SQL(Executable, Model):
         return result
 
     def _format(self, text):
-        text = text.format(task=self.task)
+        text = text.format(**self.variables)
         return text
 
     def _hintinize(self, text):
@@ -800,7 +812,7 @@ class Select(Extractable, Model):
         return self.fetch()
 
     def _format(self, text):
-        text = text.format(task=self.task)
+        text = text.format(**self.variables)
         return text
 
     def _hintinize(self, text):
@@ -1071,7 +1083,7 @@ class Insert(Executable, Model):
         pass
 
     def _format(self, text):
-        text = text.format(task=self.task)
+        text = text.format(**self.variables)
         return text
 
     def _hintinize(self, text):
