@@ -10,6 +10,9 @@ from .models import Table, SQL, Select, Insert
 from .models import CSV, JSON, XML
 from .models import Filenames, FileManager
 
+from .logger import logger
+from .config import calendar
+from .config import connector
 from .fields import run_id, task_id, step_id, process_id
 
 
@@ -24,4 +27,4 @@ __maintainer__ = __author__
 
 __all__ = [Driver, Manager, Server, Scheduler, Job, Pipeline, Mapper,
            Table, SQL, Select, Insert, CSV, JSON, XML, Filenames, FileManager,
-           run_id, task_id, step_id, process_id]
+           logger, calendar, connector, run_id, task_id, step_id, process_id]
