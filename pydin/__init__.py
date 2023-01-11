@@ -11,9 +11,8 @@ from .models import CSV, JSON, XML
 from .models import Filenames, FileManager
 
 from .logger import logger
-from .config import calendar
-from .config import connector
 from .fields import run_id, task_id, step_id, process_id
+from .utils import get_version, get_job, get_logger, get_email, get_credentials
 
 
 __version__ = '0.1.11'
@@ -27,4 +26,5 @@ __maintainer__ = __author__
 
 __all__ = [Driver, Manager, Server, Scheduler, Job, Pipeline, Mapper,
            Table, SQL, Select, Insert, CSV, JSON, XML, Filenames, FileManager,
-           logger, calendar, connector, run_id, task_id, step_id, process_id]
+           logger, run_id, task_id, step_id, process_id,
+           get_version, get_job, get_logger, get_email, get_credentials]

@@ -1,4 +1,4 @@
-"""Scheduler."""
+# PyDin Scheduler file.
 
 import pydin
 

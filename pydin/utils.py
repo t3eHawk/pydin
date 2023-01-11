@@ -60,6 +60,21 @@ def cache(object):
     return True
 
 
+def importer(module_name, *args):
+    """Get importing object from the given module."""
+    namespace =  imp.import_module(module_name)
+    degree = len(args)
+    for i, attribute_name in enumerate(args, start=1):
+        attribute = getattr(namespace, attribute_name)
+        if i < degree:
+            namespace = attribute
+        elif callable(attribute):
+            return attribute()
+        else:
+            return attribute
+    return namespace
+
+
 def terminator(pid):
     """Terminate process at a given PID correctly."""
     if LINUX or MACOS:
@@ -70,23 +85,6 @@ def terminator(pid):
         kernel.AttachConsole(pid)
         kernel.SetConsoleCtrlHandler(None, 1)
         kernel.GenerateConsoleCtrlEvent(0, 0)
-
-
-def installed():
-    """Check if application is installed and configured."""
-    from .config import user_config, config
-    if not os.path.exists(user_config):
-        return False
-    elif not config.get('DATABASE'):
-        return False
-    elif not config['DATABASE'].get('vendor_name'):
-        return False
-    elif not config.get('API'):
-        return False
-    elif not config.get('ENVIRONMENTS'):
-        return False
-    else:
-        return True
 
 
 def case(value, *options):
@@ -414,3 +412,50 @@ def sql_converter(value, db):
             return f'\'{value:%Y-%m-%d %H:%M:%S}\''
     else:
         return value
+
+
+def get_version():
+    """Get current application version."""
+    return importer('pydin', '__version__')
+
+
+def get_job():
+    """Get active application job."""
+    return importer('pydin', 'job')
+
+
+def get_logger():
+    """Get application core logger."""
+    return importer('pydin', 'logger')
+
+
+def get_email():
+    """Get application email interface."""
+    return importer('pydin', 'logger', 'email')
+
+
+def get_credentials():
+    """Get a special data dictionary containing saved credentials."""
+    return importer('pepperoni', 'credentials')
+
+
+def get_system_information():
+    """Get a special data dictionary containing system information."""
+    return importer('pepperoni', 'sysinfo')
+
+
+def installed():
+    """Check if application is installed and configured."""
+    from .config import user_config, config
+    if not os.path.exists(user_config):
+        return False
+    elif not config.get('DATABASE'):
+        return False
+    elif not config['DATABASE'].get('vendor_name'):
+        return False
+    elif not config.get('API'):
+        return False
+    elif not config.get('ENVIRONMENTS'):
+        return False
+    else:
+        return True

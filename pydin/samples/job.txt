@@ -1,13 +1,7 @@
-"""Job."""
+# PyDin Job file.
 
 import pydin
 
 
 if __name__ == '__main__':
     job = pydin.Job()
-else:
-    job = pydin.cache.Job
-    logger = job.logger
-    sysinfo = job.sysinfo
-    creds = job.creds
-    email = job.email

@@ -29,7 +29,8 @@ from .config import calendar
 from .logger import logger
 
 from .utils import locate
-from .utils import declare, cache, terminator
+from .utils import declare, cache
+from .utils import importer, terminator
 from .utils import case, coalesce
 from .utils import first, last
 from .utils import to_boolean
@@ -37,6 +38,7 @@ from .utils import to_datetime, to_timestamp
 from .utils import to_lower, to_upper
 from .utils import to_thread, to_process, to_python
 from .utils import sql_preparer
+from .utils import get_version
 from .const import LINUX, MACOS, WINDOWS
 
 from .config import Logging
@@ -50,11 +52,12 @@ class Scheduler():
         self.path = locate()
 
         self.conn = db.connect()
-        self.logger = logger
-
         self.name = name
         self.desc = desc
         self.owner = owner
+        app, desc, version = 'pydin.scheduler', 'PyDin Scheduler', get_version()
+        logger.configure(app=app, desc=desc, version=version)
+        self.logger = logger
 
         self.moment = tm.time()
         self.schedule = None
@@ -1272,7 +1275,8 @@ class Job():
         self.solo = args.solo
         self.alarm = coalesce(args.mute, alarm, schedule['alarm'], False)
         self.debug = coalesce(args.debug, debug, schedule['debug'], False)
-        logger.configure(app=self.name, desc=self.desc,
+        app, desc, version = 'pydin.job', 'PyDin Job', get_version()
+        logger.configure(app=app, desc=desc, version=version,
                          debug=self.debug, alarming=self.alarm,
                          smtp={'recipients': self.email_list})
 
@@ -1282,7 +1286,7 @@ class Job():
         self.file_log = self._parse_file_log()
         self.text_log = None
 
-        # Shortcuts for key objects.
+        # Shortcuts for different objects.
         self.logger = logger
         self.sysinfo = pe.sysinfo()
         self.creds = pe.credentials()
