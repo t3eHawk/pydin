@@ -675,12 +675,12 @@ class Connector(dict):
         parser = configparser.ConfigParser(allow_no_value=True)
         parser.read(path, encoding=encoding)
         for section in parser.sections():
-            section = section.lower()
-            self[section] = {}
+            connection_name = section.lower()
+            self[connection_name] = {}
             for option in parser.options(section):
-                option = option.lower()
-                value = parser[section][option]
-                self[section][option] = value
+                parameter_name = option.lower()
+                parameter_value = parser[section][option]
+                self[connection_name][parameter_name] = parameter_value
         return self
 
     def receive(self, name):

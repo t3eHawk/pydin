@@ -1400,13 +1400,33 @@ class XML(File):
 class Files(Model):
     """Represents file sequence as ETL model."""
 
-    def configure(self, path=None, mask=None, created=None, recursive=None,
-                  server_name=None):
+    def configure(self, server_name=None, path=None, mask=None, recursive=None,
+                  created=None, date_from=None, date_to=None):
+        self.server_name = server_name
         self.path = path
         self.mask = mask
-        self.created = created
         self.recursive = recursive
-        self.server_name = server_name
+        self.created = created or dict(date_from=date_from, date_to=date_to)
+
+    @property
+    def source_server(self):
+        """Get source server proxy."""
+        return self.file_server
+
+    @property
+    def server_name(self):
+        """Get files source server name."""
+        return self.source_name
+
+    @server_name.setter
+    def server_name(self, value):
+        if isinstance(value, str):
+            self.source_name = value
+
+    @property
+    def file_server(self):
+        """Get files source server proxy."""
+        return self.server
 
     @property
     def path(self):
@@ -1449,24 +1469,6 @@ class Files(Model):
     def created(self, value):
         if isinstance(value, (str, (dict, list, tuple))) or value is None:
             self._created = value
-
-    @property
-    def server_name(self):
-        """Get file source server name."""
-        return self._server_name
-
-    @server_name.setter
-    def server_name(self, value):
-        if isinstance(value, str) or value is None:
-            self._server_name = value
-
-    @property
-    def file_server(self):
-        """Get file source connection proxy."""
-        if not self.server_name:
-            return self.server
-        else:
-            return connector.receive(self.server_name)
 
     def read(self):
         """Read full list of files."""
@@ -1561,25 +1563,28 @@ class Files(Model):
 
     def between(self):
         """Parse date range used for file filtering."""
-        today = getattr(self.task, 'calendar', None) or calendar.Today()
+        calendar = getattr(self.pipeline, 'calendar', None) or calendar.Today()
+        minvalue = dt.datetime.min
+        maxvalue = dt.datetime.max
+        namespace = {'calendar': calendar}
         if isinstance(self.created, (dict, list, tuple)):
             if isinstance(self.created, dict):
-                date_from = self.created.get('date_from', 'None')
-                date_to = self.created.get('date_to', 'None')
+                date_from = self.created.get('date_from')
+                date_to = self.created.get('date_to')
             elif isinstance(self.created, (list, tuple)):
                 date_from = self.created[0]
                 date_to = self.created[1]
-            date_from = eval(date_from, {'calendar': today}) or dt.datetime.min
-            date_to = eval(date_to, {'calendar': today}) or dt.datetime.max
+            date_from = eval(date_from or 'None', namespace) or minvalue
+            date_to = eval(date_to or 'None', namespace) or maxvalue
         elif isinstance(self.created, str) is True:
-            date_from = eval(self.created, {'calendar': today})
-            date_to = dt.datetime.max
+            date_from = eval(self.created, namespace)
+            date_to = maxvalue
         elif self.date_field:
             date_from = self.date_from
             date_to = self.date_to
         else:
-            date_from = dt.datetime.min
-            date_to = dt.datetime.max
+            date_from = minvalue
+            date_to = maxvalue
         return (date_from, date_to)
 
     pass
@@ -1598,20 +1603,40 @@ class Filenames(Files, Extractable, Model):
 class FileManager(Files, Executable, Model):
     """Represents file manager as ETL model."""
 
-    def configure(self, path=None, mask=None, created=None, recursive=None,
-                  action='copy', dest=None, zip=False, unzip=False,
-                  nodir=False, tempname=False, server_name=None):
-        self.path = path
-        self.mask = mask
-        self.created = created
-        self.recursive = recursive
+    def configure(self, server_name=None, path=None, mask=None,
+                  target_name=None, action='copy', destination=None,
+                  recursive=False, nodirectory=False,
+                  created=None, date_from=None, date_to=None,
+                  zip=False, unzip=False, tempname=True):
+        super().configure(server_name=server_name, path=path, mask=mask,
+                          recursive=recursive, created=created,
+                          date_from=date_from, date_to=date_to)
+        self.target_name = target_name
         self.action = action
-        self.dest = dest
+        self.destination = destination
+        self.nodirectory = nodirectory
         self.zip = zip
         self.unzip = unzip
-        self.nodir = nodir
         self.tempname = tempname
-        self.server_name = server_name
+
+    @property
+    def target_name(self):
+        """Get target server name."""
+        return self._target_name
+
+    @target_name.setter
+    def target_name(self, value):
+        if isinstance(value, str) or value is None:
+            self._target_name = value.lower() if value else value
+            if self._target_name == 'localhost' or value is None:
+                self._target_server = Localhost()
+            else:
+                self._target_server = connector.receive(self._target_name)
+
+    @property
+    def target_server(self):
+        """Get target connection proxy."""
+        return self._target_server
 
     @property
     def action(self):
@@ -1629,21 +1654,21 @@ class FileManager(Files, Executable, Model):
             self._action = value
 
     @property
-    def dest(self):
+    def destination(self):
         """Get destination file directories used for file processing."""
-        return self._dest
+        return self._destination
 
-    @dest.setter
-    def dest(self, values):
+    @destination.setter
+    def destination(self, values):
         if isinstance(values, (str, list, tuple)) or values is None:
             if isinstance(values, str):
-                self._dest = [values]
+                self._destination = [values]
             elif isinstance(values, list):
-                self._dest = values
+                self._destination = values
             elif isinstance(values, tuple):
-                self._dest = [value for value in values]
+                self._destination = [value for value in values]
             elif values is None:
-                self._dest = []
+                self._destination = []
 
     @property
     def nodir(self):
@@ -1717,8 +1742,8 @@ class FileManager(Files, Executable, Model):
         try:
             # Source and target are local.
             if (
-                isinstance(self.server, Localhost)
-                and isinstance(self.file_server, Localhost)
+                isinstance(self.source_server, Localhost)
+                and isinstance(self.target_server, Localhost)
             ):
                 if self.action in ('copy', 'move'):
                     self._copy_on_localhost(fileinfo)
@@ -1726,7 +1751,7 @@ class FileManager(Files, Executable, Model):
                     self._delete_on_localhost(fileinfo)
             # Source and target are the same remote, SSH enabled.
             elif (
-                self.file_server == self.server
+                self.source_server == self.target_server
                 and self.file_server.ssh is True
             ):
                 if self.action in ('copy', 'move'):
@@ -1735,7 +1760,7 @@ class FileManager(Files, Executable, Model):
                     self._delete_on_remote_by_ssh(fileinfo)
             # Source and target are the same remote, SFTP enabled.
             elif (
-                self.file_server == self.server
+                self.source_server == self.target_server
                 and self.file_server.sftp is True
             ):
                 if self.action in ('copy', 'move'):
@@ -1744,7 +1769,7 @@ class FileManager(Files, Executable, Model):
                     self._delete_on_remote_by_sftp(fileinfo)
             # Source and target are the same remote, FTP enabled.
             elif (
-                self.file_server == self.server
+                self.source_server == self.target_server
                 and self.file_server.ftp is True
             ):
                 if self.action in ('copy', 'move'):
@@ -1753,10 +1778,10 @@ class FileManager(Files, Executable, Model):
                     self._delete_on_remote_by_ftp(fileinfo)
             # Source is local, target is remote, SFTP enabled.
             elif (
-                self.file_server != self.server
-                and isinstance(self.file_server, Localhost)
-                and isinstance(self.server, Server)
-                and self.server.sftp is True
+                self.source_server != self.target_server
+                and isinstance(self.source_server, Localhost)
+                and isinstance(self.target_server, Server)
+                and self.target_server.sftp is True
             ):
                 if self.action in ('copy', 'move'):
                     self._copy_from_localhost_to_remote_by_sftp(fileinfo)
@@ -1764,10 +1789,10 @@ class FileManager(Files, Executable, Model):
                     self._delete_on_localhost(fileinfo)
             # Source is remote, target is local, SFTP enabled.
             elif (
-                self.file_server != self.server
-                and isinstance(self.file_server, Server)
-                and isinstance(self.server, Localhost)
-                and self.file_server.sftp is True
+                self.source_server != self.target_server
+                and isinstance(self.source_server, Server)
+                and isinstance(self.target_server, Localhost)
+                and self.source_server.sftp is True
             ):
                 if self.action in ('copy', 'move'):
                     self._copy_from_remote_to_localhost_by_sftp(fileinfo)
@@ -1775,10 +1800,10 @@ class FileManager(Files, Executable, Model):
                     self._delete_on_remote_by_sftp(fileinfo)
             # Source is local, target is remote, FTP enabled.
             elif (
-                self.file_server != self.server
-                and isinstance(self.file_server, Localhost)
-                and isinstance(self.server, Server)
-                and self.server.ftp is True
+                self.source_server != self.target_server
+                and isinstance(self.source_server, Localhost)
+                and isinstance(self.target_server, Server)
+                and self.target_server.ftp is True
             ):
                 if self.action in ('copy', 'move'):
                     self._copy_from_localhost_to_remote_by_ftp(fileinfo)
@@ -1786,10 +1811,10 @@ class FileManager(Files, Executable, Model):
                     self._delete_on_localhost(fileinfo)
             # Source is remote, target is local, FTP enabled.
             elif (
-                self.file_server != self.server
-                and isinstance(self.file_server, Server) is True
-                and isinstance(self.server, Localhost) is True
-                and self.file_server.ftp is True
+                self.source_server != self.target_server
+                and isinstance(self.source_server, Server) is True
+                and isinstance(self.target_server, Localhost) is True
+                and self.source_server.ftp is True
             ):
                 if self.action in ('copy', 'move'):
                     self._copy_from_remote_to_localhost_by_ftp(fileinfo)
@@ -1797,11 +1822,11 @@ class FileManager(Files, Executable, Model):
                     self._delete_on_remote_by_ftp(fileinfo)
             # Source and target are different remotes, SFTP on both enabled.
             elif (
-                self.file_server != self.server
-                and isinstance(self.file_server, Server)
-                and isinstance(self.server, Server)
-                and self.file_server.sftp is True
-                and self.server.sftp is True
+                self.source_server != self.target_server
+                and isinstance(self.source_server, Server)
+                and isinstance(self.target_server, Server)
+                and self.source_server.sftp is True
+                and self.target_server.sftp is True
             ):
                 if self.action in ('copy', 'move'):
                     self._copy_from_remote_to_remote_by_sftp(fileinfo)
@@ -1809,11 +1834,11 @@ class FileManager(Files, Executable, Model):
                     self._delete_on_remote_by_sftp(fileinfo)
             # Source and target are different remotes, FTP on both enabled.
             elif (
-                self.file_server != self.server
-                and isinstance(self.file_server, Server)
-                and isinstance(self.server, Server)
-                and self.file_server.ftp is True
-                and self.server.ftp is True
+                self.source_server != self.target_server
+                and isinstance(self.source_server, Server)
+                and isinstance(self.target_server, Server)
+                and self.source_server.ftp is True
+                and self.target_server.ftp is True
             ):
                 if self.action in ('copy', 'move'):
                     self._copy_from_remote_to_remote_by_ftp(fileinfo)
@@ -1822,11 +1847,11 @@ class FileManager(Files, Executable, Model):
             # Source and target are different remotes, FTP enabled on source,
             # SFTP enabled on target.
             elif (
-                self.file_server != self.server
-                and isinstance(self.file_server, Server)
-                and isinstance(self.server, Server)
-                and self.file_server.ftp is True
-                and self.server.sftp is True
+                self.source_server != self.target_server
+                and isinstance(self.source_server, Server)
+                and isinstance(self.target_server, Server)
+                and self.source_server.ftp is True
+                and self.target_server.sftp is True
             ):
                 if self.action in ('copy', 'move'):
                     self._copy_from_remote_by_ftp_to_remote_by_sftp(fileinfo)
@@ -1835,11 +1860,11 @@ class FileManager(Files, Executable, Model):
             # Source and target are different remotes, SFTP enabled on source,
             # FTP enabled on target.
             elif (
-                self.file_server != self.server
-                and isinstance(self.file_server, Server)
-                and isinstance(self.server, Server)
-                and self.file_server.sftp is True
-                and self.server.ftp is True
+                self.source_server != self.target_server
+                and isinstance(self.source_server, Server)
+                and isinstance(self.target_server, Server)
+                and self.source_server.sftp is True
+                and self.target_server.ftp is True
             ):
                 if self.action in ('copy', 'move'):
                     self._copy_from_remote_by_sftp_to_remote_by_ftp(fileinfo)
@@ -1866,10 +1891,10 @@ class FileManager(Files, Executable, Model):
             step.bytes_written = bytes_volume
 
     def _copy_on_localhost(self, fileinfo):
-        for path in self.dest:
+        for path in self.destination:
             if fileinfo['isfile'] is True:
                 source = fileinfo['path']
-                dir = fileinfo['dir'] if self.nodir is False else '.'
+                dir = fileinfo['dir'] if self.nodirectory is False else '.'
                 file = fileinfo['file']
                 dest = os.path.normpath(os.path.join(path, dir))
                 if os.path.exists(dest) is False:
@@ -1877,7 +1902,7 @@ class FileManager(Files, Executable, Model):
                 dest = os.path.join(dest, file)
                 if self.unzip == 'gz' or self.unzip is True:
                     dest = os.path.splitext(dest)[0]
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with gzip.open(source, 'rb') as fhi:
                         with open(temp or dest, 'wb') as fho:
                             fho.write(fhi.read())
@@ -1887,7 +1912,7 @@ class FileManager(Files, Executable, Model):
                     continue
                 if self.zip == 'gz' or self.zip is True:
                     dest = f'{dest}.gz'
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with open(source, 'rb') as fhi:
                         with gzip.open(temp or dest, 'wb') as fho:
                             fho.write(fhi.read())
@@ -1895,7 +1920,7 @@ class FileManager(Files, Executable, Model):
                         os.rename(temp, dest)
                     logger.info(f'File {source} zipped to {dest}')
                     continue
-                temp = f'{dest}.tmp' if self.tempname is True else None
+                temp = f'{dest}.tmp' if self.tempname else None
                 shutil.copyfile(source, temp or dest)
                 if temp is not None:
                     os.rename(temp, dest)
@@ -1903,17 +1928,17 @@ class FileManager(Files, Executable, Model):
 
     def _copy_on_remote_by_ssh(self, fileinfo):
         conn = self.file_server.connect()
-        for path in self.dest:
+        for path in self.destination:
             if fileinfo['isfile'] is True:
                 source = fileinfo['path']
-                dir = fileinfo['dir'] if self.nodir is False else '.'
+                dir = fileinfo['dir'] if self.nodirectory is False else '.'
                 file = fileinfo['file']
                 dest = f'{path}/{dir}'
                 conn.execute(f'mkdir -p {dest}')
                 dest = f'{dest}/{file}'
                 if self.unzip == 'gz' or self.unzip is True:
                     dest = os.path.splitext(dest)[0]
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     conn.execute(f'gunzip -c {source} > {temp or dest}')
                     if temp is not None:
                         conn.execute(f'mv {temp} {dest}')
@@ -1921,13 +1946,13 @@ class FileManager(Files, Executable, Model):
                     continue
                 if self.zip == 'gz' or self.zip is True:
                     dest = f'{dest}.gz'
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     conn.execute(f'gzip -c {source} > {temp or dest}')
                     if temp is not None:
                         conn.execute(f'mv {temp} {dest}')
                     logger.info(f'File {source} zipped to {dest}')
                     continue
-                temp = f'{dest}.tmp' if self.tempname is True else None
+                temp = f'{dest}.tmp' if self.tempname else None
                 conn.execute(f'cp {source} {temp or dest}')
                 if temp is not None:
                     conn.execute(f'mv {temp} {dest}')
@@ -1944,16 +1969,16 @@ class FileManager(Files, Executable, Model):
         if isfile is True:
             conn = self.file_server.connect()
             source = fileinfo['path']
-            dir = fileinfo['dir'] if self.nodir is False else '.'
+            dir = fileinfo['dir'] if self.nodirectory is False else '.'
             file = fileinfo['file']
-            for path in self.dest:
+            for path in self.destination:
                 dest = os.path.normpath(os.path.join(path, dir))
                 if os.path.exists(dest) is False:
                     os.makedirs(dest)
                 dest = os.path.join(dest, file)
                 if self.unzip == 'gz' or self.unzip is True:
                     dest = os.path.splitext(dest)[0]
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with tempfile.TemporaryFile() as fhi:
                         conn.sftp.getfo(source, fhi)
                         fhi.seek(0)
@@ -1966,14 +1991,14 @@ class FileManager(Files, Executable, Model):
                     continue
                 if self.zip == 'gz' or self.zip is True:
                     dest = f'{dest}.gz'
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with gzip.open(temp or dest, 'wb') as fho:
                         conn.sftp.getfo(source, fho)
                     if temp is not None:
                         os.rename(temp, dest)
                     logger.info(f'File {source} zipped to {dest}')
                     continue
-                temp = f'{dest}.tmp' if self.tempname is True else None
+                temp = f'{dest}.tmp' if self.tempname else None
                 conn.sftp.get(source, temp or dest)
                 if temp is not None:
                     os.rename(temp, dest)
@@ -1982,18 +2007,18 @@ class FileManager(Files, Executable, Model):
     def _copy_from_localhost_to_remote_by_sftp(self, fileinfo):
         isfile = fileinfo['isfile']
         if isfile is True:
-            conn = self.server.connect()
+            conn = self.target_server.connect()
             source = fileinfo['path']
-            dir = fileinfo['dir'] if self.nodir is False else '.'
+            dir = fileinfo['dir'] if self.nodirectory is False else '.'
             file = fileinfo['file']
-            for path in self.dest:
+            for path in self.destination:
                 dest = conn.sftp.normalize(f'{path}/{dir}')
-                if self.server.exists(dest) is False:
+                if self.target_server.exists(dest) is False:
                     conn.sftp.mkdir(dest)
                 dest = conn.sftp.normalize(f'{dest}/{file}')
                 if self.unzip == 'gz' or self.unzip is True:
                     dest = os.path.splitext(dest)[0]
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with gzip.open(source, 'rb') as fhi:
                         conn.sftp.putfo(fhi, temp or dest)
                     if temp is not None:
@@ -2002,7 +2027,7 @@ class FileManager(Files, Executable, Model):
                     continue
                 if self.zip == 'gz' or self.zip is True:
                     dest = f'{dest}.gz'
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with open(source, 'rb') as fhi:
                         with tempfile.TemporaryFile() as fho:
                             with gzip.GzipFile(filename=file, mode='wb',
@@ -2014,7 +2039,7 @@ class FileManager(Files, Executable, Model):
                         conn.sftp.rename(temp, dest)
                     logger.info(f'File {source} zipped to {dest}')
                     continue
-                temp = f'{dest}.tmp' if self.tempname is True else None
+                temp = f'{dest}.tmp' if self.tempname else None
                 conn.sftp.put(source, temp or dest)
                 if temp is not None:
                     conn.sftp.rename(temp, dest)
@@ -2023,21 +2048,19 @@ class FileManager(Files, Executable, Model):
     def _copy_from_remote_to_remote_by_sftp(self, fileinfo):
         isfile = fileinfo['isfile']
         if isfile is True:
-            remote_in = self.file_server
-            remote_out = self.server
-            conn_in = remote_in.connect()
-            conn_out = remote_out.connect()
+            conn_in = self.source_server.connect()
+            conn_out = self.target_server.connect()
             source = fileinfo['path']
-            dir = fileinfo['dir'] if self.nodir is False else '.'
+            dir = fileinfo['dir'] if self.nodirectory is False else '.'
             file = fileinfo['file']
-            for path in self.dest:
+            for path in self.destination:
                 dest = conn_out.sftp.normalize(f'{path}/{dir}')
-                if remote_out.exists(dest) is False:
+                if self.target_server.exists(dest) is False:
                     conn_out.sftp.mkdir(dest)
                 dest = conn_out.sftp.normalize(f'{dest}/{file}')
                 if self.unzip == 'gz' or self.unzip is True:
                     dest = os.path.splitext(dest)[0]
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with tempfile.TemporaryFile() as th:
                         conn_in.sftp.getfo(source, th)
                         th.seek(0)
@@ -2049,7 +2072,7 @@ class FileManager(Files, Executable, Model):
                     continue
                 if self.zip == 'gz' or self.zip is True:
                     dest = f'{dest}.gz'
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with tempfile.TemporaryFile() as th:
                         with gzip.GzipFile(filename=file, mode='wb',
                                            fileobj=th) as gz:
@@ -2060,7 +2083,7 @@ class FileManager(Files, Executable, Model):
                         conn_out.sftp.rename(temp, dest)
                     logger.info(f'File {source} zipped to {dest}')
                     continue
-                temp = f'{dest}.tmp' if self.tempname is True else None
+                temp = f'{dest}.tmp' if self.tempname else None
                 with tempfile.TemporaryFile() as th:
                     conn_in.sftp.getfo(source, th)
                     th.seek(0)
@@ -2072,18 +2095,18 @@ class FileManager(Files, Executable, Model):
     def _copy_from_localhost_to_remote_by_ftp(self, fileinfo):
         isfile = fileinfo['isfile']
         if isfile is True:
-            conn = self.server.connect()
+            conn = self.target_server.connect()
             source = fileinfo['path']
-            dir = fileinfo['dir'] if self.nodir is False else '.'
+            dir = fileinfo['dir'] if self.nodirectory is False else '.'
             file = fileinfo['file']
-            for path in self.dest:
+            for path in self.destination:
                 dest = f'{path}/{dir}'
-                if self.server.exists(dest) is False:
+                if self.target_server.exists(dest) is False:
                     conn.ftp.mkd(dest)
                 dest = f'{dest}/{file}'
                 if self.unzip == 'gz' or self.unzip is True:
                     dest = os.path.splitext(dest)[0]
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with gzip.open(source) as fhi:
                         with tempfile.TemporaryFile() as fho:
                             shutil.copyfileobj(fhi, fho)
@@ -2095,7 +2118,7 @@ class FileManager(Files, Executable, Model):
                     continue
                 if self.zip == 'gz' or self.zip is True:
                     dest = f'{dest}.gz'
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with open(source, 'rb') as fhi:
                         with tempfile.TemporaryFile() as fho:
                             with gzip.GzipFile(filename=file, mode='wb',
@@ -2107,7 +2130,7 @@ class FileManager(Files, Executable, Model):
                         conn.ftp.rename(temp, dest)
                     logger.info(f'File {source} zipped to {dest}')
                     continue
-                temp = f'{dest}.tmp' if self.tempname is True else None
+                temp = f'{dest}.tmp' if self.tempname else None
                 with open(source, 'rb') as fhi:
                     conn.ftp.storbinary(f'STOR {temp or dest}', fhi)
                 if temp is not None:
@@ -2117,18 +2140,18 @@ class FileManager(Files, Executable, Model):
     def _copy_from_remote_to_localhost_by_ftp(self, fileinfo):
         isfile = fileinfo['isfile']
         if isfile is True:
-            conn = self.file_server.connect()
+            conn = self.source_server.connect()
             source = fileinfo['path']
-            dir = fileinfo['dir'] if self.nodir is False else '.'
+            dir = fileinfo['dir'] if self.nodirectory is False else '.'
             file = fileinfo['file']
-            for path in self.dest:
+            for path in self.destination:
                 dest = os.path.normpath(os.path.join(path, dir))
                 if os.path.exists(dest) is False:
                     os.makedirs(dest)
                 dest = os.path.join(dest, file)
                 if self.unzip == 'gz' or self.unzip is True:
                     dest = os.path.splitext(dest)[0]
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with tempfile.TemporaryFile() as fhi:
                         conn.ftp.retrbinary(f'RETR {source}', fhi.write)
                         fhi.seek(0)
@@ -2141,7 +2164,7 @@ class FileManager(Files, Executable, Model):
                     continue
                 if self.zip == 'gz' or self.zip is True:
                     dest = f'{dest}.gz'
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with tempfile.TemporaryFile() as fhi:
                         conn.ftp.retrbinary(f'RETR {source}', fhi.write)
                         fhi.seek(0)
@@ -2151,7 +2174,7 @@ class FileManager(Files, Executable, Model):
                         os.rename(temp, dest)
                     logger.info(f'File {source} zipped to {dest}')
                     continue
-                temp = f'{dest}.tmp' if self.tempname is True else None
+                temp = f'{dest}.tmp' if self.tempname else None
                 with open(temp or dest, 'wb') as fho:
                     conn.ftp.retrbinary(f'RETR {source}', fho.write)
                 if temp is not None:
@@ -2161,21 +2184,19 @@ class FileManager(Files, Executable, Model):
     def _copy_from_remote_to_remote_by_ftp(self, fileinfo):
         isfile = fileinfo['isfile']
         if isfile is True:
-            remote_in = self.file_server
-            remote_out = self.server
-            conn_in = remote_in.connect()
-            conn_out = remote_out.connect()
+            conn_in = self.source_server.connect()
+            conn_out = self.target_server.connect()
             source = fileinfo['path']
-            dir = fileinfo['dir'] if self.nodir is False else '.'
+            dir = fileinfo['dir'] if self.nodirectory is False else '.'
             file = fileinfo['file']
-            for path in self.dest:
+            for path in self.destination:
                 dest = f'{path}/{dir}'
-                if remote_out.exists(dest) is False:
+                if self.target_server.exists(dest) is False:
                     conn_out.ftp.mkd(dest)
                 dest = f'{dest}/{file}'
                 if self.unzip == 'gz' or self.unzip is True:
                     dest = os.path.splitext(dest)[0]
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with tempfile.TemporaryFile() as th:
                         conn_in.ftp.retrbinary(f'RETR {source}', th.write)
                         th.seek(0)
@@ -2187,7 +2208,7 @@ class FileManager(Files, Executable, Model):
                     continue
                 if self.zip == 'gz' or self.zip is True:
                     dest = f'{dest}.gz'
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with tempfile.TemporaryFile() as th:
                         with gzip.GzipFile(filename=file, mode='wb',
                                            fileobj=th) as gz:
@@ -2198,7 +2219,7 @@ class FileManager(Files, Executable, Model):
                         conn_out.ftp.rename(temp, dest)
                     logger.info(f'File {source} zipped to {dest}')
                     continue
-                temp = f'{dest}.tmp' if self.tempname is True else None
+                temp = f'{dest}.tmp' if self.tempname else None
                 with tempfile.TemporaryFile() as th:
                     conn_in.ftp.retrbinary(f'RETR {source}', th.write)
                     th.seek(0)
@@ -2210,21 +2231,19 @@ class FileManager(Files, Executable, Model):
     def _copy_from_remote_by_ftp_to_remote_by_sftp(self, fileinfo):
         isfile = fileinfo['isfile']
         if isfile is True:
-            remote_in = self.file_server
-            remote_out = self.server
-            conn_in = remote_in.connect()
-            conn_out = remote_out.connect()
+            conn_in = self.source_server.connect()
+            conn_out = self.target_server.connect()
             source = fileinfo['path']
-            dir = fileinfo['dir'] if self.nodir is False else '.'
+            dir = fileinfo['dir'] if self.nodirectory is False else '.'
             file = fileinfo['file']
-            for path in self.dest:
+            for path in self.destination:
                 dest = conn_out.sftp.normalize(f'{path}/{dir}')
-                if remote_out.exists(dest) is False:
+                if self.target_server.exists(dest) is False:
                     conn_out.sftp.mkdir(dest)
                 dest = conn_out.sftp.normalize(f'{dest}/{file}')
                 if self.unzip == 'gz' or self.unzip is True:
                     dest = os.path.splitext(dest)[0]
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with tempfile.TemporaryFile() as fhi:
                         conn_in.ftp.retrbinary(f'RETR {source}', fhi.write)
                         fhi.seek(0)
@@ -2236,7 +2255,7 @@ class FileManager(Files, Executable, Model):
                     continue
                 if self.zip == 'gz' or self.zip is True:
                     dest = f'{dest}.gz'
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with tempfile.TemporaryFile() as fhi:
                         with gzip.GzipFile(filename=file, mode='wb',
                                            fileobj=fhi) as gz:
@@ -2247,7 +2266,7 @@ class FileManager(Files, Executable, Model):
                         conn_out.sftp.rename(temp, dest)
                     logger.info(f'File {source} zipped to {dest}')
                     continue
-                temp = f'{dest}.tmp' if self.tempname is True else None
+                temp = f'{dest}.tmp' if self.tempname else None
                 with tempfile.TemporaryFile() as th:
                     conn_in.ftp.retrbinary(f'RETR {source}', th.write)
                     th.seek(0)
@@ -2259,21 +2278,19 @@ class FileManager(Files, Executable, Model):
     def _copy_from_remote_by_sftp_to_remote_by_ftp(self, fileinfo):
         isfile = fileinfo['isfile']
         if isfile is True:
-            remote_in = fileinfo['server']
-            conn_in = remote_in.connect()
-            remote_out = self.server
-            conn_out = remote_out.connect()
+            conn_in = self.source_server.connect()
+            conn_out = self.target_server.connect()
             source = fileinfo['path']
-            dir = fileinfo['dir'] if self.nodir is False else '.'
+            dir = fileinfo['dir'] if self.nodirectory is False else '.'
             file = fileinfo['file']
-            for path in self.dest:
+            for path in self.destination:
                 dest = f'{path}/{dir}'
-                if remote_out.exists(dest) is False:
+                if self.target_server.exists(dest) is False:
                     conn_out.ftp.mkd(dest)
                 dest = f'{dest}/{file}'
                 if self.unzip == 'gz' or self.unzip is True:
                     dest = os.path.splitext(dest)[0]
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with tempfile.TemporaryFile() as fhi:
                         conn_in.sftp.getfo(source, fhi)
                         fhi.seek(0)
@@ -2285,7 +2302,7 @@ class FileManager(Files, Executable, Model):
                     continue
                 if self.zip == 'gz' or self.zip is True:
                     dest = f'{dest}.gz'
-                    temp = f'{dest}.tmp' if self.tempname is True else None
+                    temp = f'{dest}.tmp' if self.tempname else None
                     with tempfile.TemporaryFile() as fho:
                         with gzip.GzipFile(filename=file, mode='wb',
                                            fileobj=fho) as gz:
@@ -2296,7 +2313,7 @@ class FileManager(Files, Executable, Model):
                         conn_out.ftp.rename(temp, dest)
                     logger.info(f'File {source} zipped to {dest}')
                     continue
-                temp = f'{dest}.tmp' if self.tempname is True else None
+                temp = f'{dest}.tmp' if self.tempname else None
                 with tempfile.TemporaryFile() as th:
                     conn_in.sftp.getfo(source, th)
                     th.seek(0)

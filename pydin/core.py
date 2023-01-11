@@ -2922,7 +2922,6 @@ class Node(Unit):
         self.steps = []
         self._prev = []
         self._next = []
-        pass
 
     @property
     def node_name(self):
@@ -2932,7 +2931,6 @@ class Node(Unit):
     @node_name.setter
     def node_name(self, value):
         self.name = value
-        pass
 
     @property
     def source_name(self):
@@ -2942,16 +2940,15 @@ class Node(Unit):
     @source_name.setter
     def source_name(self, value):
         if isinstance(value, str) or value is None:
-            self._source_name = value
+            self._source_name = value.lower() if value else value
             if self._source_name == 'localhost' or value is None:
                 self.server = Localhost()
             else:
-                connection = connector.receive(value)
+                connection = connector.receive(self._source_name)
                 if isinstance(connection, Database):
                     self.database = self.db = connection
                 elif isinstance(connection, Server):
                     self.server = connection
-        pass
 
     @property
     def prev(self):
@@ -2964,7 +2961,6 @@ class Node(Unit):
         if isinstance(node, Node) and node not in self._prev:
             self._prev.append(node)
             node.next = self
-        pass
 
     @property
     def next(self):
@@ -2976,7 +2972,6 @@ class Node(Unit):
         """Connect the node as a proceeding to this one."""
         if isinstance(node, Node) and node not in self._next:
             self._next.append(node)
-        pass
 
     @property
     def joins(self):
@@ -3003,7 +2998,6 @@ class Node(Unit):
                 name = f'{self.name}-{seqno}'
         self.pipeline.nodes[name] = self
         logger.debug(f'Node {self} configured in {pipeline}')
-        pass
 
     def join(self, step):
         """Make this node a join between the given and following steps."""
@@ -3013,6 +3007,5 @@ class Node(Unit):
         else:
             message = (f'step must be Step, not {step.__class__.__name__}')
             raise TypeError(message)
-        pass
 
     pass
