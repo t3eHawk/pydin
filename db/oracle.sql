@@ -93,12 +93,11 @@ create table pd_node_config (
   job_id       number(*, 0) not null,
   pipeline_id  number(*, 0) not null,
   node_id      number(*, 0),
-  node_seqno   number(*, 0) not null,
   node_name    varchar2(50 char),
   node_desc    varchar2(200 char),
   node_type    varchar2(50 char) not null,
   node_config  clob,
-  source_name  varchar2(50 char) not null,
+  source_name  varchar2(50 char),
   custom_query clob,
   date_field   varchar2(50 char),
   days_back    number(*, 0),
@@ -109,8 +108,8 @@ create table pd_node_config (
   key_field    varchar2(50 char),
   chunk_size   number(*, 0) default 1000,
   cleanup      varchar2(1 char),
-  input_list   varchar2(100 char),
-  output_list  varchar2(100 char)
+  node_seqno   number(*, 0) not null,
+  edge_seqlist varchar2(100 char)
 );
 
 create sequence pd_node_config_seq

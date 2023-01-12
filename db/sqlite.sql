@@ -65,12 +65,11 @@ create table pd_node_config (
   job_id       integer not null,
   pipeline_id  integer not null,
   node_id      integer primary key autoincrement,
-  node_seqno   integer not null,
   node_name    text,
   node_desc    text,
   node_type    text not null,
   node_config  text,
-  source_name  text not null,
+  source_name  text,
   custom_query text,
   date_field   text,
   days_back    integer,
@@ -81,8 +80,8 @@ create table pd_node_config (
   key_field    text,
   chunk_size   integer default 1000,
   cleanup      text,
-  input_list   text,
-  output_list  text
+  node_seqno   integer not null,
+  edge_seqlist text,
   unique(job_id, pipeline_id, node_seqno)
 );
 
