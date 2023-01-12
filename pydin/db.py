@@ -150,7 +150,8 @@ class Database(pe.Database):
 
     def normalize(self, job_name=None, job_description=None, status=None,
                   monthday=None, hour=None, minute=None, second=None,
-                  weekday=None, yearday=None, trigger_id=None,
+                  weekday=None, yearday=None,
+                  trigger_id=None, trigger_list=None,
                   start_date=None, end_date=None,
                   environment=None, arguments=None,
                   timeout=None, parallelism=None,
@@ -180,6 +181,8 @@ class Database(pe.Database):
                   'types': (int, str)},
                  {'column': 'trigger_id', 'value': trigger_id,
                   'types': (int,)},
+                 {'column': 'trigger_list', 'value': trigger_list,
+                  'types': (str,)},
                  {'column': 'start_date', 'value': start_date,
                   'types': (str, dt.datetime), 'norm_func': to_datetime},
                  {'column': 'end_date', 'value': end_date,

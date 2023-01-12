@@ -543,13 +543,19 @@ class Manager():
         sec = input('Second [0-59] ======= ') or None
         wday = input('Week day [1-7] ====== ') or None
         yday = input('Year day [1-366] ==== ') or None
-        trig = input('Parent Job ID [1...n] ') or None
+        trig = input('Parent Job ID(s) [1...n] ') or None
+        trig_list = None
         if isinstance(trig, str):
             if trig.isdigit() or trig == '-':
                 trig = int(trig) if trig.isdigit() else trig
                 trig = db.null if trig == '-' else trig
+                trig_list = db.null
+            elif ';' in trig:
+                trig_list = trig
+                trig = db.null
             else:
                 trig = to_none(trig)
+                trig_list = to_none(trig)
 
         print()
         start_date = input('Start date [YYYY-MM-DD HH24:MI:SS] ') or None
@@ -617,6 +623,8 @@ class Manager():
         email_list = input('List notification email addresses [a,b,...]: ')
         pattern = r'([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+\.[a-zA-Z0-9_-]+)'
         email_list = ','.join(re.findall(pattern, email_list)) or None
+        print()
+
         result = {'name': name,
                   'desc': desc,
                   'env': env,
@@ -627,6 +635,7 @@ class Manager():
                   'wday': wday,
                   'yday': yday,
                   'trig': trig,
+                  'trig_list': trig_list,
                   'start_date': start_date,
                   'end_date': end_date,
                   'timeout': timeout,
@@ -639,8 +648,6 @@ class Manager():
                   'wake_up_period': wake_up_period,
                   'alarm': alarm,
                   'email_list': email_list}
-
-        print()
         return result
 
     def _expand_configs(self):

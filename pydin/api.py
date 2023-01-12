@@ -245,7 +245,7 @@ class Driver():
 
     def configure_job(self, id, name=None, desc=None, mday=None,
                       hour=None, min=None, sec=None, wday=None, yday=None,
-                      trig=None, start_date=None, end_date=None,
+                      trig=None, trig_list=None, start_date=None, end_date=None,
                       env=None, args=None, timeout=None, parallelism=None,
                       rerun_interval=None, rerun_limit=None, rerun_days=None,
                       rerun_period=None, sleep_period=None, wake_up_period=None,
@@ -262,6 +262,7 @@ class Driver():
                               weekday=wday,
                               yearday=yday,
                               trigger_id=trig,
+                              trigger_list=trig_list,
                               start_date=start_date,
                               end_date=end_date,
                               environment=env,

@@ -103,7 +103,6 @@ class Scheduler():
             elif args.stop:
                 logger.configure(file=False, debug=args.debug)
                 self.stop()
-        pass
 
     def __repr__(self):
         """Represent this scheduler with its name."""
@@ -1203,6 +1202,8 @@ class Scheduler():
         conn.execute(update)
         logger.debug('Component information updated')
 
+    pass
+
 
 class Job():
     """Represents single application job."""
@@ -1967,7 +1968,6 @@ class Process():
             class_name = value.__class__.__name__
             message = (f'pipeline must be Pipeline, not {class_name}')
             raise TypeError(message)
-        pass
 
     @property
     def job(self):
@@ -1991,7 +1991,6 @@ class Process():
             self._name = value
         else:
             self._name = None
-        pass
 
     def error_handler(self):
         """Process last error."""
@@ -2030,7 +2029,6 @@ class Unit():
             class_name = value.__class__.__name__
             message = (f'pipeline must be Pipeline, not {class_name}')
             raise TypeError(message)
-        pass
 
     @property
     def job(self):
@@ -2055,7 +2053,6 @@ class Unit():
         else:
             message = f'name must be str, not {value.__class__.__name__}'
             raise TypeError(message)
-        pass
 
     @property
     def seqno(self):
@@ -2069,17 +2066,14 @@ class Unit():
         else:
             message = f'seqno must be int, not {value.__class__.__name__}'
             raise TypeError(message)
-        pass
 
     def rename(self, new_name):
         """Change unit name."""
         self.name = new_name
-        pass
 
     def renumber(self, new_seqno):
         """Change unit sequence number."""
         self.seqno = new_seqno
-        pass
 
     pass
 
@@ -2108,7 +2102,6 @@ class Task(Process):
         self._result_long = 0
         self.errors = set()
         self.updated = None
-        pass
 
     def __repr__(self):
         """Represent task."""
@@ -2124,7 +2117,6 @@ class Task(Process):
     @task_name.setter
     def task_name(self, value):
         self.name = value
-        pass
 
     @property
     def status(self):
@@ -2141,7 +2133,6 @@ class Task(Process):
         else:
             message = (f'status must be str not {value.__class__.__name__}')
             raise TypeError(message)
-        pass
 
     @property
     def target(self):
@@ -2178,7 +2169,6 @@ class Task(Process):
         if isinstance(value, int):
             self._records_read += value
             self.logger.table(records_read=self.records_read)
-        pass
 
     @property
     def records_written(self):
@@ -2190,7 +2180,6 @@ class Task(Process):
         if isinstance(value, int):
             self._records_written += value
             self.logger.table(records_written=self.records_written)
-        pass
 
     @property
     def records_processed(self):
@@ -2202,7 +2191,6 @@ class Task(Process):
         if isinstance(value, int):
             self._records_processed += value
             self.logger.table(records_processed=self.records_processed)
-        pass
 
     @property
     def records_error(self):
@@ -2214,7 +2202,6 @@ class Task(Process):
         if isinstance(value, int):
             self._records_error += value
             self.logger.table(records_error=self.records_error)
-        pass
 
     @property
     def files_read(self):
@@ -2270,7 +2257,6 @@ class Task(Process):
         if isinstance(value, int):
             self._result_value = value
             self.logger.table(result_value=self.result_value)
-        pass
 
     @property
     def result_long(self):
@@ -2282,7 +2268,6 @@ class Task(Process):
         if isinstance(value, (list, tuple, dict, str)):
             self._result_long = value
             self.logger.table(result_long=str(self.result_long))
-        pass
 
     def setup(self, pipeline):
         """Configure the task for the given pipeline."""
@@ -2290,7 +2275,6 @@ class Task(Process):
         self.logger = self.pipeline.logging.task.setup()
         logger.debug(f'Logger {self.logger.name} is used in {self} logging')
         logger.debug(f'{self} configured in {pipeline}')
-        pass
 
     def launch(self):
         """Launch task according to target."""
@@ -2365,7 +2349,6 @@ class Task(Process):
         logger.debug(f'Preparing {self}...')
         self.prepare()
         logger.debug(f'{self} prepared')
-        pass
 
     def _start(self):
         logger.info(f'Starting {self} from {self.pipeline}...')
@@ -2398,7 +2381,6 @@ class Task(Process):
             logger.debug(f'Waiting for {thread.name} in {self} to finish...')
             thread.join()
             logger.debug(f'{thread.name} in {self} finished')
-        pass
 
     def _fail(self):
         logger.error()
@@ -2434,7 +2416,6 @@ class Task(Process):
             if self.status not in ('D', 'E'):
                 logger.debug(f'Caught unexpected end in {self}')
                 self.status = 'U'
-        pass
 
     pass
 
@@ -2476,7 +2457,6 @@ class Step(Process, Unit):
         self._result_long = 0
         self.errors = set()
         self.updated = None
-        pass
 
     def __repr__(self):
         """Represent step."""
@@ -2493,7 +2473,6 @@ class Step(Process, Unit):
     @step_name.setter
     def step_name(self, value):
         self.name = value
-        pass
 
     @property
     def type(self):
@@ -2560,7 +2539,6 @@ class Step(Process, Unit):
         else:
             message = (f'status must be str not {value.__class__.__name__}')
             raise TypeError(message)
-        pass
 
     @property
     def target(self):
@@ -2601,7 +2579,6 @@ class Step(Process, Unit):
             self._records_read += value
             self.task.records_read = value
             self.logger.table(records_read=self.records_read)
-        pass
 
     @property
     def records_written(self):
@@ -2614,7 +2591,6 @@ class Step(Process, Unit):
             self._records_written += value
             self.task.records_written = value
             self.logger.table(records_written=self.records_written)
-        pass
 
     @property
     def records_processed(self):
@@ -2627,7 +2603,6 @@ class Step(Process, Unit):
             self._records_processed += value
             self.task.records_processed = value
             self.logger.table(records_processed=self.records_processed)
-        pass
 
     @property
     def records_error(self):
@@ -2640,7 +2615,6 @@ class Step(Process, Unit):
             self._records_error += value
             self.task.records_error = value
             self.logger.table(records_error=self.records_error)
-        pass
 
     @property
     def files_read(self):
@@ -2701,7 +2675,6 @@ class Step(Process, Unit):
             self._result_value = value
             self.task.result_value = value
             self.logger.table(result_value=self.result_value)
-        pass
 
     @property
     def result_long(self):
@@ -2714,7 +2687,6 @@ class Step(Process, Unit):
             self._result_long = value
             self.task.result_long = value
             self.logger.table(result_long=str(self.result_long))
-        pass
 
     @property
     def extraction(self):
@@ -2767,7 +2739,6 @@ class Step(Process, Unit):
         self.logger = self.pipeline.logging.step.setup(self)
         logger.debug(f'Logger {self.logger.name} is used in {self} logging')
         logger.debug(f'{self} {self.branch} configured in {pipeline}')
-        pass
 
     def launch(self):
         """Launch this step in a separate thread."""
@@ -2784,7 +2755,6 @@ class Step(Process, Unit):
         if self.status == 'D':
             for step in self.last.joins:
                 step.launch()
-        pass
 
     def run(self):
         """Run this step."""
@@ -2870,7 +2840,6 @@ class Step(Process, Unit):
             logger.debug(f'Waiting for {thread.name} to finish...')
             thread.join()
             logger.debug(f'{thread.name} finished')
-        pass
 
     def _fail(self):
         logger.error()
@@ -2883,7 +2852,6 @@ class Step(Process, Unit):
             self.pipeline.task.errors.add(exc_info)
             if self.pipeline.job:
                 self.pipeline.job.errors.add(exc_info)
-        pass
 
     def _end(self):
         logger.debug(f'Ending {self}...')
@@ -2892,7 +2860,6 @@ class Step(Process, Unit):
             self.end_date = dt.datetime.now()
             self.logger.table(end_date=self.end_date)
         logger.debug(f'{self} ended')
-        pass
 
     def _done(self):
         logger.info(f'{self} done')
@@ -2908,7 +2875,6 @@ class Step(Process, Unit):
             if self.status not in ('D', 'E'):
                 logger.debug(f'Caught unexpected end in {self}')
                 self.status = 'U'
-        pass
 
     pass
 
