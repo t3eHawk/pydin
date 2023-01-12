@@ -31,7 +31,7 @@ from .core import Node
 
 
 class Model(Node):
-    """Represents single pipeline ETL model."""
+    """Represents a single node model."""
 
     extractable = False
     transformable = False
@@ -43,7 +43,8 @@ class Model(Node):
                  hours_back=None, months_back=None, timezone=None,
                  value_field=None, target_value=None,
                  min_value=None, max_value=None,
-                 key_field=None, chunk_size=1000, cleanup=False, **kwargs):
+                 key_field=None, insert_key_field=True,
+                 chunk_size=1000, cleanup=False, **kwargs):
         super().__init__(node_name=model_name, source_name=source_name)
         self.custom_query = custom_query
         if date_field:
@@ -57,6 +58,7 @@ class Model(Node):
             self.target_value = target_value
             self.min_value, self.max_value = min_value, max_value
         self.key_field = key_field(self) if key_field else None
+        self.insert_key_field = insert_key_field
         self.chunk_size = chunk_size
         self.cleanup = cleanup
         self.configure(*args, **kwargs)
@@ -69,7 +71,6 @@ class Model(Node):
     @model_name.setter
     def model_name(self, value):
         self.name = value
-        pass
 
     @property
     def key_field(self):
@@ -222,6 +223,13 @@ class Model(Node):
             else:
                 return value
 
+    def process(self, dataset):
+        """Process dataset if necessary."""
+        if self.key_field and self.insert_key_field:
+            for record in dataset:
+                record[self.key_field.label] = self.key_field.value
+        return dataset
+
     def explain(self, parameter_name=None):
         """Get model or chosen parameter description."""
         if not parameter_name:
@@ -267,7 +275,6 @@ class Extractable():
         except Exception:
             logger.error()
             step.error_handler()
-        pass
 
     def extract(self):
         if self:
@@ -300,14 +307,14 @@ class Transformable():
                     continue
                 break
             else:
-                input_records = input_queue.get()
+                input_dataset = input_queue.get()
                 try:
-                    output_records = list(map(self.transform, input_records))
-                    output_queue.put(output_records)
-                    step.records_processed = len(output_records)
+                    output_dataset = list(map(self.transform, input_dataset))
+                    output_queue.put(output_dataset)
+                    step.records_processed = len(output_dataset)
                     logger.info(f'{step.records_processed} records processed')
                 except Exception:
-                    step.records_error = len(input_records)
+                    step.records_error = len(input_dataset)
                     logger.info(f'{step.records_error} records with error')
                     logger.error()
                     step.error_handler()
@@ -315,7 +322,6 @@ class Transformable():
                         break
                 else:
                     input_queue.task_done()
-        pass
 
     def transform(self):
         if self:
@@ -350,6 +356,7 @@ class Loadable():
             else:
                 dataset = queue.get()
                 try:
+                    dataset = self.process(dataset)
                     result = self.load(step, dataset)
                     step.records_written = len(coalesce(result, dataset))
                     logger.info(f'{step.records_written} records written')
@@ -362,7 +369,6 @@ class Loadable():
                         break
                 else:
                     queue.task_done()
-        pass
 
     def load(self):
         if self:
@@ -396,7 +402,6 @@ class Executable():
         except Exception:
             logger.error()
             step.error_handler()
-        pass
 
     def execute(self):
         if self:
@@ -412,11 +417,10 @@ class Mapper(Transformable, Model):
         """Configure transformation."""
         if func:
             self.transform = func
-        pass
 
-    def transform(self, input):
+    def transform(self, record):
         """Transform data."""
-        return input
+        return record
 
     pass
 
@@ -425,12 +429,38 @@ class Table(Extractable, Loadable, Model):
     """Represents database table as ETL model."""
 
     def configure(self, schema_name=None, table_name=None, db_link=None,
-                  append=False):
+                  fetch_size=None, commit_size=None, append=False):
         self.schema_name = schema_name
         self.table_name = table_name
         self.db_link = db_link
+        self.fetch_size = fetch_size
+        self.commit_size = commit_size
         self.append = append
-        pass
+
+    def prepare(self):
+        """Prepare model for ETL operation."""
+        if self.cleanup is True:
+            logger.debug(f'Table {self.table_name} will be purged')
+            if self.db.vendor == 'oracle':
+                self.truncate()
+            else:
+                self.delete()
+
+    def extract(self, step):
+        """Extract data."""
+        return self.fetch()
+
+    def load(self, step, dataset):
+        """Load data."""
+        self.insert(dataset)
+
+    def recycle(self, key_value):
+        """Perform the recycle of this node."""
+        conn = self.db.connect()
+        table = self.get_table()
+        column = table.columns[self.key_field.label]
+        delete = table.delete().where(column == key_value)
+        conn.execute(delete)
 
     @property
     def schema_name(self):
@@ -443,7 +473,6 @@ class Table(Extractable, Loadable, Model):
             self._schema_name = value.lower()
         else:
             self._schema_name = None
-        pass
 
     @property
     def table_name(self):
@@ -456,7 +485,6 @@ class Table(Extractable, Loadable, Model):
             self._table_name = value.lower()
         else:
             self._table_name = None
-        pass
 
     @property
     def db_link(self):
@@ -469,7 +497,26 @@ class Table(Extractable, Loadable, Model):
             self._db_link = value.lower()
         else:
             self._db_link = None
-        pass
+
+    @property
+    def fetch_size(self):
+        """Get fetch size value."""
+        return self.chunk_size
+
+    @fetch_size.setter
+    def fetch_size(self, value):
+        if isinstance(value, int):
+            self.chunk_size = value
+
+    @property
+    def commit_size(self):
+        """Get commit size value."""
+        return self.chunk_size
+
+    @commit_size.setter
+    def commit_size(self, value):
+        if isinstance(value, int):
+            self.chunk_size = value
 
     @property
     def reference(self):
@@ -486,7 +533,6 @@ class Table(Extractable, Loadable, Model):
         """Check if table exists."""
         if self.db is not None:
             return self.db.engine.has_table(self.table_name)
-        pass
 
     @property
     def append(self):
@@ -499,7 +545,6 @@ class Table(Extractable, Loadable, Model):
             self._append = value
         else:
             self._append = None
-        pass
 
     def get_table(self):
         """Get object representing table."""
@@ -523,12 +568,11 @@ class Table(Extractable, Loadable, Model):
         """Fetch data from the table."""
         answerset = self.select()
         while True:
-            dataset = answerset.fetchmany(self.chunk_size)
+            dataset = answerset.fetchmany(self.fetch_size)
             if dataset:
                 yield [dict(record) for record in dataset]
             else:
                 break
-        pass
 
     def insert(self, chunk):
         """Insert data in chunk to the table."""
@@ -544,7 +588,6 @@ class Table(Extractable, Loadable, Model):
         query = table.delete()
         result = conn.execute(query)
         logger.info(f'{result.rowcount} {self.table_name} records deleted')
-        pass
 
     def truncate(self):
         """Truncate table data."""
@@ -552,34 +595,6 @@ class Table(Extractable, Loadable, Model):
         query = sa.text(f'truncate table {self.reference}')
         conn.execute(query)
         logger.info(f'Table {self.table_name} truncated')
-        pass
-
-    def prepare(self):
-        """Prepare model for ETL operation."""
-        if self.cleanup is True:
-            logger.debug(f'Table {self.table_name} will be purged')
-            if self.db.vendor == 'oracle':
-                self.truncate()
-            else:
-                self.delete()
-        pass
-
-    def extract(self, step):
-        """Extract data."""
-        return self.fetch()
-
-    def load(self, step, dataset):
-        """Load data."""
-        self.insert(dataset)
-        pass
-
-    def recycle(self, key_value):
-        """Perform the recycle of this node."""
-        conn = self.db.connect()
-        table = self.get_table()
-        column = table.columns[self.key_field.label]
-        delete = table.delete().where(column == key_value)
-        conn.execute(delete)
 
     pass
 
@@ -676,12 +691,17 @@ class Select(Extractable, Model):
     """Represents SQL select as ETL model."""
 
     def configure(self, text=None, path=None, columns=None, alias=None,
-                  parallel=False):
+                  fetch_size=None, parallel=False):
         self.text = text
         self.path = path
         self.columns = columns
+        self.fetch_size = fetch_size
         self.alias = alias
         self.parallel = parallel
+
+    def extract(self, step):
+        """Extract data."""
+        return self.fetch()
 
     @property
     def text(self):
@@ -717,6 +737,16 @@ class Select(Extractable, Model):
                 self._columns = value
 
     @property
+    def fetch_size(self):
+        """Get fetch size value."""
+        return self.chunk_size
+
+    @fetch_size.setter
+    def fetch_size(self, value):
+        if isinstance(value, int):
+            self.chunk_size = value
+
+    @property
     def parallel(self):
         """Get parallel flag."""
         return self._parallel
@@ -745,28 +775,39 @@ class Select(Extractable, Model):
         query = self.query_with_columns.alias(name=alias)
         return query
 
-    @property
-    def fetch_size(self):
-        """Get fetch size value."""
-        return self._fetch_size
-
-    @fetch_size.setter
-    def fetch_size(self, value):
-        if isinstance(value, int):
-            self._fetch_size = value
-
     def parse(self):
         """Parse into SQL text object."""
-        text = self.text
-        text = self._format(text)
-        text = self._hintinize(text)
-        query = sa.text(text)
+        query = self.assemble()
+        query = self._format(query)
+        query = self._hintinize(query)
+        return query
+
+    def assemble(self):
+        """Build raw SQL statement."""
+        query = self.text
+        columns = [sa.column(column) for column in self.describe()]
+
+        if self.date_field:
+            date_from = sql_converter(self.date_from, self.db)
+            date_to = sql_converter(self.date_to, self.db)
+            between = f'{self.date_field} between {date_from} and {date_to}'
+            query = sql_formatter(query, expand_where=between)
+
+        if self.value_field:
+            last_value = self.get_last_value()
+            if last_value:
+                comparison = f'{self.value_field} > {last_value}'
+                query = sql_formatter(query, make_subquery=True)
+                query = sql_formatter(query, expand_where=comparison)
+
+        query = sa.text(f'\n{query}').columns(*columns)
+        query = sql_compiler(query, self.db)
         return query
 
     def describe(self):
         """Get a real column list from the answerset."""
         conn = self.db.connect()
-        query = self.query
+        query = self.text
         query = self._format(query)
         query = self._hintinize(query)
         query = to_sql(f'select * from ({query}) where 1 = 0')
@@ -788,15 +829,11 @@ class Select(Extractable, Model):
         """Fetch data from the query answerset."""
         answerset = self.execute()
         while True:
-            dataset = answerset.fetchmany(self.chunk_size)
+            dataset = answerset.fetchmany(self.fetch_size)
             if dataset:
                 yield [dict(record) for record in dataset]
             else:
                 break
-
-    def extract(self, step):
-        """Extract data."""
-        return self.fetch()
 
     def _format(self, text):
         text = text.format(**self.variables)
@@ -924,6 +961,16 @@ class Insert(Executable, Model):
         return table
 
     @property
+    def select(self):
+        """Get formatted SQL select text."""
+        return self.custom_query
+
+    @select.setter
+    def select(self, value):
+        if isinstance(value, str):
+            self.custom_query = value
+
+    @property
     def append(self):
         """Get append flag."""
         return self._append
@@ -944,16 +991,6 @@ class Insert(Executable, Model):
             self._parallel = value
 
     @property
-    def select(self):
-        """Get formatted SQL select text."""
-        return self.custom_query
-
-    @select.setter
-    def select(self, value):
-        if isinstance(value, str):
-            self.custom_query = value
-
-    @property
     def text(self):
         """Get raw SQL text."""
         return self.assemble()
@@ -963,9 +1000,12 @@ class Insert(Executable, Model):
         """Get formatted SQL text that can be executed in database."""
         return self.parse()
 
-    def get_table(self):
-        """Get object representing table."""
-        return self.proxy
+    def parse(self):
+        """Parse final SQL statement."""
+        query = self.assemble()
+        query = self._format(query)
+        query = self._hintinize(query)
+        return query
 
     def assemble(self):
         """Build raw SQL statement."""
@@ -975,7 +1015,7 @@ class Insert(Executable, Model):
         select = self.select
         columns = [sa.column(column) for column in self.describe()]
 
-        if self.key_field:
+        if self.key_field and self.insert_key_field:
             columns = [*columns, self.key_field.column]
             expression = f'{self.key_field.value} as {self.key_field.label}'
             select = sql_formatter(select, expand_select=expression)
@@ -996,13 +1036,6 @@ class Insert(Executable, Model):
         select = sa.text(f'\n{select}').columns(*columns)
         query = insert.from_select(columns, select)
         query = sql_compiler(query, self.db)
-        return query
-
-    def parse(self):
-        """Parse final SQL statement."""
-        query = self.assemble()
-        query = self._format(query)
-        query = self._hintinize(query)
         return query
 
     def describe(self):
@@ -1030,6 +1063,10 @@ class Insert(Executable, Model):
         query = sa.text(f'truncate table {self.reference}')
         conn.execute(query)
         logger.info(f'Table {self.table_name} truncated')
+
+    def get_table(self):
+        """Get object representing table."""
+        return self.proxy
 
     def createlog(self):
         """Generate special logger."""
@@ -1113,7 +1150,6 @@ class File(Extractable, Loadable, Model):
         self.file_name = file_name
         self.path = path
         self.encoding = encoding
-        pass
 
     @property
     def file_name(self):
@@ -1126,7 +1162,6 @@ class File(Extractable, Loadable, Model):
             self._file_name = tm.strftime(value) if value is not None else None
             if self.file_name is not None:
                 self.path = os.path.join(self._path, self._file_name)
-        pass
 
     @property
     def path(self):
@@ -1137,7 +1172,6 @@ class File(Extractable, Loadable, Model):
     def path(self, value):
         if isinstance(value, str) or value is None:
             self._path = os.path.abspath(value) if value is not None else None
-        pass
 
     @property
     def encoding(self):
@@ -1148,7 +1182,6 @@ class File(Extractable, Loadable, Model):
     def encoding(self, value):
         if isinstance(value, str) or value is None:
             self._encoding = value
-        pass
 
     @property
     def empty(self):
@@ -1162,14 +1195,12 @@ class File(Extractable, Loadable, Model):
         """Delete all file data."""
         open(self.path, 'w+').close()
         logger.info(f'File {self.path} was completely purged')
-        pass
 
     def prepare(self):
         """Prepare model ETL operation."""
         if self.cleanup is True:
             logger.debug(f'File {self.path} will be completely purged')
             self.delete()
-        pass
 
     pass
 
@@ -1187,7 +1218,6 @@ class CSV(File):
         self.terminator = terminator
         self.enclosure = enclosure
         self.trim = trim
-        pass
 
     @property
     def head(self):
@@ -1198,7 +1228,6 @@ class CSV(File):
     def head(self, value):
         if isinstance(value, bool) or value is None:
             self._head = value
-        pass
 
     @property
     def columns(self):
@@ -1212,7 +1241,6 @@ class CSV(File):
                 self._columns = value
             else:
                 self._columns = None
-        pass
 
     @property
     def delimiter(self):
@@ -1223,7 +1251,6 @@ class CSV(File):
     def delimiter(self, value):
         if isinstance(value, str) or value is None:
             self._delimiter = value
-        pass
 
     @property
     def terminator(self):
@@ -1234,7 +1261,6 @@ class CSV(File):
     def terminator(self, value):
         if isinstance(value, str) or value is None:
             self._terminator = value
-        pass
 
     @property
     def enclosure(self):
@@ -1245,7 +1271,6 @@ class CSV(File):
     def enclosure(self, value):
         if isinstance(value, str) or value is None:
             self._enclosure = value
-        pass
 
     @property
     def trim(self):
@@ -1256,7 +1281,6 @@ class CSV(File):
     def trim(self, value):
         if isinstance(value, bool) or value is None:
             self._trim = value
-        pass
 
     @property
     def dialect(self):
@@ -1293,7 +1317,6 @@ class CSV(File):
                     yield chunk
                     chunk = []
                 i += 1
-        pass
 
     def load(self, step, dataset):
         """Load data to CSV file."""
@@ -1304,7 +1327,6 @@ class CSV(File):
             if self.head is True and self.empty:
                 writer.writeheader()
             writer.writerows(dataset)
-        pass
 
     pass
 
@@ -1314,7 +1336,6 @@ class JSON(File):
 
     def configure(self, file_name=None, path=None, encoding='utf-8'):
         super().configure(file_name=file_name, path=path, encoding=encoding)
-        pass
 
     def parse(self):
         """Parse JSON file and return its current content."""
@@ -1323,7 +1344,6 @@ class JSON(File):
                 return json.load(fh)
         else:
             return []
-        pass
 
     def extract(self, step):
         """Extract data from JSON file."""
@@ -1336,14 +1356,12 @@ class JSON(File):
                 yield rows[start:end]
                 start += self.chunk_size
                 end = start+self.chunk_size
-        pass
 
     def load(self, step, dataset):
         """Load data to JSON file."""
         content = self.parse()
         with open(self.path, 'w', encoding=self.encoding) as fh:
             json.dump(content+dataset, fh, indent=2)
-        pass
 
     pass
 
@@ -1353,7 +1371,6 @@ class XML(File):
 
     def configure(self, file_name=None, path=None, encoding='utf-8'):
         super().configure(file_name=file_name, path=path, encoding=encoding)
-        pass
 
     def parse(self):
         """Parse XML file and/or get XML tree root."""
@@ -1361,7 +1378,6 @@ class XML(File):
             return xet.parse(self.path).getroot()
         else:
             return xet.Element('data')
-        pass
 
     def extract(self, step):
         """Extract data from XML file."""
@@ -1376,7 +1392,6 @@ class XML(File):
             yield dataset
             start += self.chunk_size
             end = start+self.chunk_size
-        pass
 
     def load(self, step, dataset):
         """Load data to XML file."""
@@ -1392,7 +1407,6 @@ class XML(File):
             string = string.replace('\n', '')
             dom = xdom.parseString(string)
             dom.writexml(fh, addindent='  ', newl='\n')
-        pass
 
     pass
 

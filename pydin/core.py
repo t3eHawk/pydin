@@ -2197,7 +2197,7 @@ class Task(Process):
         """Get number of records processed."""
         return self._records_processed
 
-    @records_written.setter
+    @records_processed.setter
     def records_processed(self, value):
         if isinstance(value, int):
             self._records_processed += value
@@ -2621,10 +2621,11 @@ class Step(Process, Unit):
         """Get number of records processed."""
         return self._records_processed
 
-    @records_written.setter
+    @records_processed.setter
     def records_processed(self, value):
         if isinstance(value, int):
             self._records_processed += value
+            self.task.records_processed = value
             self.logger.table(records_processed=self.records_processed)
         pass
 
