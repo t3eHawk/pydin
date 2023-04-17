@@ -105,9 +105,9 @@ create table pd_run_history (
   rerun_now   text,
   rerun_done  text,
   recycle_ind text,
+  deactivated text,
   trigger_id  integer,
   data_dump   blob,
-  deactivated text,
   file_log    text,
   text_log    text,
   updated     text

@@ -464,7 +464,7 @@ class Table(Extractable, Loadable, Model):
 
     def load(self, dataset):
         """Load data."""
-        return self.insert(dataset)
+        self.insert(dataset)
 
     def recycle(self, key_value):
         """Perform the recycle of this node."""

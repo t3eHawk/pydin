@@ -13,9 +13,7 @@ long_description = open('README.md', 'r').read()
 long_description_content_type = 'text/markdown'
 license = pydin.__license__
 url = 'https://github.com/t3eHawk/pydin'
-install_requires = ['pepperoni', 'sqlalchemy', 'cx_Oracle', 'paramiko',
-                    'flask', 'flask_httpauth', 'waitress',
-                    'sqlparse', 'gitpython']
+install_requires = open('requirements.txt').read().splitlines()
 packages = setuptools.find_packages()
 package_data = {'pydin': ['demo/*', 'samples/*']}
 classifiers = ['Programming Language :: Python :: 3',
