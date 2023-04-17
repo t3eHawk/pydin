@@ -13,8 +13,8 @@ from .api import Driver
 
 from .db import db
 from .config import config
-from .config import connector
 from .logger import logger
+from .utils import connector
 from .utils import locate
 from .utils import to_none
 
@@ -370,11 +370,11 @@ class Manager():
 
     def cancel_jobs(self):
         """Cancel all currently running jobs."""
-        print(f'You are trying to cancel all currently running jobs...')
+        print('You are trying to cancel all currently running jobs...')
         sure = self.sure or self._are_you_sure()
         if sure:
             self.driver.cancel_jobs()
-            print(f'All jobs canceled.')
+            print('All jobs canceled.')
 
     def cancel_run(self, id):
         """Cancel run using its ID."""
@@ -467,7 +467,7 @@ class Manager():
 
     def _are_you_sure(self):
         while True:
-            sure = input(f'Are you sure? [Y/n] ')
+            sure = input('Are you sure? [Y/n] ')
             if sure in ('Y', 'n'):
                 sure = True if sure == 'Y' else False
                 break

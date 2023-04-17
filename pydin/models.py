@@ -5,7 +5,6 @@ import datetime as dt
 import gzip
 import json
 import os
-import sys
 import re
 import shutil
 import stat
@@ -16,11 +15,11 @@ import xml.etree.ElementTree as xet
 import xml.dom.minidom as xdom
 
 import sqlalchemy as sa
-import sqlparse as spe
+import sqlparse as spa
 
-from .config import connector, calendar
-from .config import Localhost, Server, Database
 from .logger import logger
+from .utils import calendar
+from .utils import connector
 
 from .utils import to_sql
 from .utils import coalesce
@@ -28,6 +27,7 @@ from .utils import read_file_or_string
 from .utils import sql_formatter, sql_compiler, sql_converter
 
 from .core import Node
+from .sources import Localhost, Server, Database
 
 
 class Model(Node):
@@ -73,6 +73,10 @@ class Model(Node):
         self.name = value
 
     @property
+    def model_type(self):
+        return self.__class__.__name__
+
+    @property
     def key_field(self):
         """Key field of this model."""
         return self._key_field
@@ -96,17 +100,14 @@ class Model(Node):
         """Target date of this model."""
         if hasattr(self, 'date_field'):
             date = self.pipeline.calendar
-
             if isinstance(self.days_back, int):
                 date = date.days_back(self.days_back)
             elif isinstance(self.hours_back, int):
                 date = date.hours_back(self.hours_back)
             elif isinstance(self.months_back, int):
                 date = date.months_back(self.months_back)
-
             if self.timezone:
                 date.timezone = self.timezone
-
             return date
 
     @property
@@ -144,6 +145,7 @@ class Model(Node):
 
     @property
     def custom_query(self):
+        """."""
         return self._custom_query
 
     @custom_query.setter
@@ -168,44 +170,72 @@ class Model(Node):
         return data
 
     @property
+    def logging(self):
+        """Get the available logging interface for this model."""
+        if self.pipeline:
+            if isinstance(self, Query):
+                return self.pipeline.logging.query
+            elif isinstance(self, (File, Files)):
+                return self.pipeline.logging.file
+
+    @property
     def recyclable(self):
+        """Identifies if the model is recyclable type or not."""
         if hasattr(self, 'recycle'):
             return True
-        else:
-            return False
+        return False
 
-    def configure(self):
+    def configure(self, *args, **kwargs):
         """Configure this ETL model."""
-        if self:
-            raise NotImplementedError
+        raise NotImplementedError
+
+    def begin(self, *args, **kwargs):
+        """Open as a new object within the given structure."""
+        if self.logging:
+            self.logging.setup()
+            self.logging.start(self, *args, **kwargs)
 
     def prepare(self):
         """Do something with this ETL model before run."""
-        pass
 
     def release(self):
         """Do something with this ETL model after run."""
-        pass
 
     def create(self):
         """Create corresponding object in the data source."""
-        if self:
-            raise NotImplementedError
 
     def remove(self):
         """Remove corresponding object from the data source."""
-        if self:
-            raise NotImplementedError
 
     def clean(self):
         """Clean all data in the corresponding object."""
-        if self:
-            raise NotImplementedError
+
+    def finish(self, *args, **kwargs):
+        """Save as a closed object in the end of work."""
+        if self.logging:
+            self.logging.end(self, *args, **kwargs)
+
+    def explain(self, parameter_name=None):
+        """Get model or chosen parameter description."""
+        if not parameter_name:
+            return self.__doc__
+        else:
+            attribute = getattr(self, parameter_name)
+            if attribute:
+                return attribute.__doc__
+
+    def process(self, dataset):
+        """Process dataset if necessary."""
+        if self.key_field and self.insert_key_field:
+            for record in dataset:
+                record[self.key_field.label] = self.key_field.value
+        return dataset
 
     def get_last_value(self):
         """Get last loaded value of this model."""
         if hasattr(self, 'value_field'):
-            return self._get_last_value()
+            if hasattr(self, '_get_last_value'):
+                return self._get_last_value()
 
     def read_custom_query(self, value):
         """Read custom query."""
@@ -223,24 +253,6 @@ class Model(Node):
             else:
                 return value
 
-    def process(self, dataset):
-        """Process dataset if necessary."""
-        if self.key_field and self.insert_key_field:
-            for record in dataset:
-                record[self.key_field.label] = self.key_field.value
-        return dataset
-
-    def explain(self, parameter_name=None):
-        """Get model or chosen parameter description."""
-        if not parameter_name:
-            return self.__doc__
-        else:
-            attribute = getattr(self, parameter_name)
-            if attribute:
-                return attribute.__doc__
-
-    pass
-
 
 class Extractable():
     """Represents extractable model."""
@@ -250,17 +262,19 @@ class Extractable():
     def to_extractor(self, step, queue):
         """Start model extractor."""
         name = f'{self}-Extractor'
-        target = dict(target=self.extractor, args=(step, queue))
-        self.thread = th.Thread(name=name, **target, daemon=True)
-        step.threads.append(self.thread)
-        logger.debug(f'Starting {self.thread.name}...')
+        target, args = self.extractor, (step, queue)
+        thread = th.Thread(name=name, target=target, args=args, daemon=True)
+        logger.debug(f'Starting {thread.name}...')
+        step.threads.append(thread)
+        self.step = step
+        self.thread = thread
         return self.thread.start()
 
     def extractor(self, step, queue):
         """Extract data."""
         logger.info(f'Reading records from {self}...')
         try:
-            for dataset in self.extract(step):
+            for dataset in self.extract():
                 try:
                     queue.put(dataset)
                     step.records_read = len(dataset)
@@ -277,10 +291,8 @@ class Extractable():
             step.error_handler()
 
     def extract(self):
-        if self:
-            raise NotImplementedError
-
-    pass
+        """Base extract method."""
+        raise NotImplementedError
 
 
 class Transformable():
@@ -288,21 +300,23 @@ class Transformable():
 
     transformable = True
 
-    def to_transformer(self, step, input, output):
+    def to_transformer(self, step, input_queue, output_queue):
         """Start model transformer."""
         name = f'{self}-Transformer'
-        target = dict(target=self.transformator, args=(step, input, output))
-        self.thread = th.Thread(name=name, **target, daemon=True)
-        step.threads.append(self.thread)
-        logger.debug(f'Starting {self.thread.name}...')
+        target, args = self.transformator, (step, input_queue, output_queue)
+        thread = th.Thread(name=name, target=target, args=args, daemon=True)
+        logger.debug(f'Starting {thread.name}...')
+        step.threads.append(thread)
+        self.step = step
+        self.thread = thread
         return self.thread.start()
 
     def transformator(self, step, input_queue, output_queue):
         """Transform data."""
         logger.info(f'Processing records of {self}...')
         while True:
-            if input_queue.empty() is True:
-                if step.extraction is True:
+            if input_queue.empty():
+                if step.extraction:
                     tm.sleep(0.001)
                     continue
                 break
@@ -324,10 +338,8 @@ class Transformable():
                     input_queue.task_done()
 
     def transform(self):
-        if self:
-            raise NotImplementedError
-
-    pass
+        """Base transform method."""
+        raise NotImplementedError
 
 
 class Loadable():
@@ -338,10 +350,12 @@ class Loadable():
     def to_loader(self, step, queue):
         """Start model loader."""
         name = f'{self}-Loader'
-        target = dict(target=self.loader, args=(step, queue))
-        self.thread = th.Thread(name=name, **target, daemon=True)
-        step.threads.append(self.thread)
-        logger.debug(f'Starting {self.thread.name}...')
+        target, args = self.loader, (step, queue)
+        thread = th.Thread(name=name, target=target, args=args, daemon=True)
+        logger.debug(f'Starting {thread.name}...')
+        step.threads.append(thread)
+        self.step = step
+        self.thread = thread
         return self.thread.start()
 
     def loader(self, step, queue):
@@ -357,7 +371,7 @@ class Loadable():
                 dataset = queue.get()
                 try:
                     dataset = self.process(dataset)
-                    result = self.load(step, dataset)
+                    result = self.load(dataset)
                     step.records_written = len(coalesce(result, dataset))
                     logger.info(f'{step.records_written} records written')
                 except Exception:
@@ -370,11 +384,9 @@ class Loadable():
                 else:
                     queue.task_done()
 
-    def load(self):
-        if self:
-            raise NotImplementedError
-
-    pass
+    def load(self, dataset):
+        """Base load method."""
+        raise NotImplementedError
 
 
 class Executable():
@@ -385,10 +397,12 @@ class Executable():
     def to_executor(self, step):
         """Start model executor."""
         name = f'{self}-Executor'
-        target = dict(target=self.executor, args=(step,))
-        self.thread = th.Thread(name=name, **target, daemon=True)
-        step.threads.append(self.thread)
-        logger.debug(f'Starting {self.thread.name}...')
+        target, args = self.executor, (step,)
+        thread = th.Thread(name=name, target=target, args=args, daemon=True)
+        logger.debug(f'Starting {thread.name}...')
+        step.threads.append(thread)
+        self.step = step
+        self.thread = thread
         return self.thread.start()
 
     def executor(self, step):
@@ -403,11 +417,9 @@ class Executable():
             logger.error()
             step.error_handler()
 
-    def execute(self):
-        if self:
-            raise NotImplementedError
-
-    pass
+    def execute(self, step):
+        """Base execute method."""
+        raise NotImplementedError
 
 
 class Mapper(Transformable, Model):
@@ -446,13 +458,13 @@ class Table(Extractable, Loadable, Model):
             else:
                 self.delete()
 
-    def extract(self, step):
+    def extract(self):
         """Extract data."""
         return self.fetch()
 
-    def load(self, step, dataset):
+    def load(self, dataset):
         """Load data."""
-        self.insert(dataset)
+        return self.insert(dataset)
 
     def recycle(self, key_value):
         """Perform the recycle of this node."""
@@ -599,7 +611,42 @@ class Table(Extractable, Loadable, Model):
     pass
 
 
-class SQL(Executable, Model):
+class Query(Model):
+    """Represents base query as ETL model."""
+
+    def __init__(self, *args, **kwargs):
+        self.db_name = None
+        self.schema_name = None
+        self.table_name = None
+        self.query_type = None
+        self.query_text = None
+        self.output_rows = None
+        self.output_text = None
+        self.error_code = None
+        self.error_text = None
+        super().__init__(*args, **kwargs)
+
+    def rewrite(self, text):
+        """Rewrite the query text with the given value."""
+        self.query_text = text
+        return self.query_text
+
+    def save_as_completed(self, result_value=None):
+        """Save as a successfully completed object."""
+        self.output_rows = result_value
+        self.error_code = None
+        self.error_text = None
+        return self.finish()
+
+    def save_as_failed(self, error_description=None):
+        """Save as an error object."""
+        self.output_rows = None
+        self.error_code = None
+        self.error_text = error_description
+        return self.finish()
+
+
+class SQL(Executable, Query):
     """Represents SQL script as ETL model."""
 
     def configure(self, text=None, path=None, parallel=False):
@@ -647,21 +694,39 @@ class SQL(Executable, Model):
 
     def parse(self):
         """Parse into SQL text object."""
-        text = self.text
-        text = self._format(text)
-        text = self._hintinize(text)
-        query = sa.text(text)
+        query = self.assemble()
+        query = self._format(query)
+        query = self._hintinize(query)
+        query = self.rewrite(query)
+        return query
+
+    def assemble(self):
+        """Build raw SQL statement."""
+        query = sa.text(self.text)
+        query = sql_compiler(query, self.db)
+        query = sql_formatter(query, fix_new_lines=True)
         return query
 
     def execute(self, step):
         """Execute action."""
+        conn = self.db.connect().execution_options(autocommit=True)
         query = self.query
-        conn = self.db.connect()
-        logger.info(f'Running SQL query...')
+        logger.info('Running SQL query...')
         logger.line(f'-------------------\n{query}\n-------------------')
-        result = conn.execute(query)
-        logger.info(f'SQL query completed')
-        return result
+        self.begin()
+        try:
+            result = conn.execute(query)
+        except sa.exc.SQLAlchemyError as error:
+            error_description = str(error.__dict__['orig'])
+            self.save_as_failed(error_description=error_description)
+            logger.info('SQL query failed')
+            raise error
+        else:
+            result_value = result.rowcount
+            self.save_as_completed(result_value=result_value)
+            logger.info(f'{result_value} records processed')
+            logger.info('SQL query completed')
+            return result
 
     def _format(self, text):
         text = text.format(**self.variables)
@@ -669,9 +734,9 @@ class SQL(Executable, Model):
 
     def _hintinize(self, text):
         if self.db.vendor == 'oracle':
-            statements = spe.parse(text)
+            statements = spa.parse(text)
             tvalue = 'SELECT'
-            ttype = spe.tokens.Keyword.DML
+            ttype = spa.tokens.Keyword.DML
             parallel = self.parallel
             if parallel > 0:
                 degree = '' if parallel is True else f'({parallel})'
@@ -679,7 +744,7 @@ class SQL(Executable, Model):
                 for i, token in enumerate(statements[0].tokens):
                     if token.match(ttype, tvalue):
                         tvalue = f'{tvalue} {hint}'
-                        new_token = spe.sql.Token(ttype, tvalue)
+                        new_token = spa.sql.Token(ttype, tvalue)
                         statements[0].tokens[i] = new_token
             text = str(statements[0])
         return text
@@ -687,7 +752,7 @@ class SQL(Executable, Model):
     pass
 
 
-class Select(Extractable, Model):
+class Select(Extractable, Query):
     """Represents SQL select as ETL model."""
 
     def configure(self, text=None, path=None, columns=None, alias=None,
@@ -699,7 +764,7 @@ class Select(Extractable, Model):
         self.alias = alias
         self.parallel = parallel
 
-    def extract(self, step):
+    def extract(self):
         """Extract data."""
         return self.fetch()
 
@@ -765,7 +830,7 @@ class Select(Extractable, Model):
     def query_with_columns(self):
         """Get SQL text object with described columns."""
         columns = [sa.column(column) for column in self.describe()]
-        query = self.query.columns(*columns)
+        query = sa.text(self.query).columns(*columns)
         return query
 
     @property
@@ -780,6 +845,7 @@ class Select(Extractable, Model):
         query = self.assemble()
         query = self._format(query)
         query = self._hintinize(query)
+        query = self.rewrite(query)
         return query
 
     def assemble(self):
@@ -800,8 +866,9 @@ class Select(Extractable, Model):
                 query = sql_formatter(query, make_subquery=True)
                 query = sql_formatter(query, expand_where=comparison)
 
-        query = sa.text(f'\n{query}').columns(*columns)
+        query = sa.text(query).columns(*columns)
         query = sql_compiler(query, self.db)
+        query = sql_formatter(query)
         return query
 
     def describe(self):
@@ -810,30 +877,42 @@ class Select(Extractable, Model):
         query = self.text
         query = self._format(query)
         query = self._hintinize(query)
-        query = to_sql(f'select * from ({query}) where 1 = 0')
-        answerset = conn.execute(query)
-        columns = [column for column in answerset.keys()]
+        query = sql_formatter(query, make_empty=True, db=self.db)
+        result = conn.execute(query)
+        columns = [column for column in result.keys()]
         return columns
 
     def execute(self):
         """Execute SQL query in database."""
         conn = self.db.connect()
         query = self.parse()
-        logger.info(f'Running SQL query...')
+        logger.info('Running SQL query...')
         logger.line(f'-------------------\n{query}\n-------------------')
-        answerset = conn.execute(query)
-        logger.info(f'SQL query completed')
-        return answerset
+        self.begin()
+        result = conn.execute(query)
+        logger.info('SQL query completed')
+        return result
 
     def fetch(self):
         """Fetch data from the query answerset."""
-        answerset = self.execute()
-        while True:
-            dataset = answerset.fetchmany(self.fetch_size)
-            if dataset:
-                yield [dict(record) for record in dataset]
-            else:
-                break
+        try:
+            result = self.execute()
+            result_value = 0
+            while True:
+                dataset = result.fetchmany(self.fetch_size)
+                if dataset:
+                    result_value += len(dataset)
+                    yield [dict(record) for record in dataset]
+                else:
+                    break
+        except sa.exc.SQLAlchemyError as error:
+            error_description = str(error.__dict__['orig'])
+            self.save_as_failed(error_description=error_description)
+            logger.info('SQL query failed')
+            raise error
+        else:
+            self.save_as_completed(result_value=result_value)
+            logger.info(f'{result_value} records fetched')
 
     def _format(self, text):
         text = text.format(**self.variables)
@@ -841,9 +920,9 @@ class Select(Extractable, Model):
 
     def _hintinize(self, text):
         if self.db.vendor == 'oracle':
-            statements = spe.parse(text)
+            statements = spa.parse(text)
             tvalue = 'SELECT'
-            ttype = spe.tokens.Keyword.DML
+            ttype = spa.tokens.Keyword.DML
             parallel = self.parallel
             if parallel > 0:
                 degree = '' if parallel is True else f'({parallel})'
@@ -851,15 +930,13 @@ class Select(Extractable, Model):
                 for i, token in enumerate(statements[0].tokens):
                     if token.match(ttype, tvalue):
                         tvalue = f'{tvalue} {hint}'
-                        new_token = spe.sql.Token(ttype, tvalue)
+                        new_token = spa.sql.Token(ttype, tvalue)
                         statements[0].tokens[i] = new_token
             text = str(statements[0])
         return text
 
-    pass
 
-
-class Insert(Executable, Model):
+class Insert(Executable, Query):
     """Represents SQL insert as ETL model."""
 
     def configure(self, schema_name=None, table_name=None,
@@ -874,26 +951,22 @@ class Insert(Executable, Model):
         """Perform the action of this node."""
         conn = self.db.connect()
         query = self.parse()
-        logger.info(f'Running SQL query...')
+        logger.info('Running SQL query...')
         logger.line(f'-------------------\n{query}\n-------------------')
-        self.startlog(job_id=self.job.id if self.task.job else None,
-                      run_id=self.job.record_id if self.job else None,
-                      task_id=self.task.id,
-                      step_id=step.id,
-                      db_name=self.db.name,
-                      table_name=self.table_name,
-                      query_text=query)
+        self.begin()
         try:
             result = conn.execute(query)
         except sa.exc.SQLAlchemyError as error:
-            self.endlog(error_text=error.orig.__str__())
-            logger.info(f'SQL query failed')
+            error_description = str(error.__dict__['orig'])
+            self.save_as_failed(error_description=error_description)
+            logger.info('SQL query failed')
             raise error
         else:
-            self.endlog(output_rows=result.rowcount)
-            logger.info(f'SQL query completed')
-            logger.info(f'{result.rowcount} records inserted')
-            return result.rowcount
+            result_value = result.rowcount
+            self.save_as_completed(result_value=result_value)
+            logger.info('SQL query completed')
+            logger.info(f'{result_value} records inserted')
+            return result_value
 
     def recycle(self, key_value):
         """Perform the recycle of this node."""
@@ -905,7 +978,6 @@ class Insert(Executable, Model):
 
     def prepare(self):
         """Prepare this node for the run."""
-        self.logger = self.createlog()
         if self.cleanup is True:
             self.clean()
 
@@ -947,8 +1019,6 @@ class Insert(Executable, Model):
         string = self.table_name
         if self.schema_name:
             string = f'{self.schema_name}.{string}'
-        if self.db_link:
-            string = f'{string}@{self.db_link}'
         return string
 
     @property
@@ -1005,6 +1075,7 @@ class Insert(Executable, Model):
         query = self.assemble()
         query = self._format(query)
         query = self._hintinize(query)
+        query = self.rewrite(query)
         return query
 
     def assemble(self):
@@ -1033,9 +1104,10 @@ class Insert(Executable, Model):
                 select = sql_formatter(select, make_subquery=True)
                 select = sql_formatter(select, expand_where=comparison)
 
-        select = sa.text(f'\n{select}').columns(*columns)
-        query = insert.from_select(columns, select)
-        query = sql_compiler(query, self.db)
+        select = sa.text(select).columns(*columns)
+        insert = insert.from_select(columns, select)
+        query = sql_compiler(insert, self.db)
+        query = sql_formatter(query, fix_new_lines=True)
         return query
 
     def describe(self):
@@ -1044,7 +1116,7 @@ class Insert(Executable, Model):
         query = self.select
         query = self._format(query)
         query = self._hintinize(query)
-        query = to_sql(f'select * from ({query}) where 1 = 0')
+        query = sql_formatter(query, make_empty=True, db=self.db)
         answerset = conn.execute(query)
         columns = [column for column in answerset.keys()]
         return columns
@@ -1068,58 +1140,31 @@ class Insert(Executable, Model):
         """Get object representing table."""
         return self.proxy
 
-    def createlog(self):
-        """Generate special logger."""
-        return self.pipeline.logging.sql.setup()
-
-    def startlog(self, job_id=None, run_id=None, task_id=None, step_id=None,
-                 db_name=None, table_name=None, query_text=None):
-        """Start special logging."""
-        self.logger.root.table.new()
-        self.logger.table(job_id=job_id,
-                          run_id=run_id,
-                          task_id=task_id,
-                          step_id=step_id,
-                          db_name=db_name,
-                          table_name=table_name,
-                          query_type=self.__class__.__name__,
-                          query_text=query_text,
-                          start_date=dt.datetime.now())
-
-    def endlog(self, output_rows=None, output_text=None,
-                error_code=None, error_text=None):
-        """End special logging."""
-        self.logger.table(end_date=dt.datetime.now(),
-                          output_rows=output_rows,
-                          output_text=output_text,
-                          error_code=error_code,
-                          error_text=error_text)
-
     def _format(self, text):
         text = text.format(**self.variables)
         return text
 
     def _hintinize(self, text):
         if self.db.vendor == 'oracle':
-            statements = spe.parse(text)
+            statements = spa.parse(text)
             if self.parallel > 0:
                 tvalue = 'SELECT'
-                ttype = spe.tokens.Keyword.DML
+                ttype = spa.tokens.Keyword.DML
                 degree = '' if self.parallel is True else f'({self.parallel})'
                 hint = f'/*+ parallel{degree} */'
                 for i, token in enumerate(statements[0].tokens):
                     if token.match(ttype, tvalue):
                         tvalue = f'{tvalue} {hint}'
-                        new_token = spe.sql.Token(ttype, tvalue)
+                        new_token = spa.sql.Token(ttype, tvalue)
                         statements[0].tokens[i] = new_token
             if self.append is True:
                 tvalue = 'INSERT'
-                ttype = spe.tokens.Keyword.DML
+                ttype = spa.tokens.Keyword.DML
                 hint = '/*+ append */'
                 for i, token in enumerate(statements[0].tokens):
                     if token.match(ttype, tvalue):
                         tvalue = f'{tvalue} {hint}'
-                        new_token = spe.sql.Token(ttype, tvalue)
+                        new_token = spa.sql.Token(ttype, tvalue)
                         statements[0].tokens[i] = new_token
             text = str(statements[0])
         return text
@@ -1304,7 +1349,7 @@ class CSV(File):
             total = sum(1 for i in reader)
             return total
 
-    def extract(self, step):
+    def extract(self):
         """Extract data from CSV file."""
         with open(self.path, 'r', encoding=self.encoding) as fh:
             reader = csv.DictReader(fh, self.columns, **self.dialect)
@@ -1318,7 +1363,7 @@ class CSV(File):
                     chunk = []
                 i += 1
 
-    def load(self, step, dataset):
+    def load(self, dataset):
         """Load data to CSV file."""
         with open(self.path, 'a', encoding=self.encoding, newline='') as fh:
             dialect = self.dialect
@@ -1345,7 +1390,7 @@ class JSON(File):
         else:
             return []
 
-    def extract(self, step):
+    def extract(self):
         """Extract data from JSON file."""
         with open(self.path, 'r', encoding=self.encoding) as fh:
             rows = json.load(fh)
@@ -1357,7 +1402,7 @@ class JSON(File):
                 start += self.chunk_size
                 end = start+self.chunk_size
 
-    def load(self, step, dataset):
+    def load(self, dataset):
         """Load data to JSON file."""
         content = self.parse()
         with open(self.path, 'w', encoding=self.encoding) as fh:
@@ -1379,7 +1424,7 @@ class XML(File):
         else:
             return xet.Element('data')
 
-    def extract(self, step):
+    def extract(self):
         """Extract data from XML file."""
         root = self.parse()
         length = len(root)
@@ -1393,7 +1438,7 @@ class XML(File):
             start += self.chunk_size
             end = start+self.chunk_size
 
-    def load(self, step, dataset):
+    def load(self, dataset):
         """Load data to XML file."""
         root = self.parse()
         for record in dataset:
@@ -1494,7 +1539,8 @@ class Files(Model):
     def filter(self):
         """Generate filtered list of files."""
         date_from, date_to = self.between()
-        logger.info(f'Using mask {self.mask} to filter files')
+        # logger.info(f'Using mask {self.mask} to filter files')
+        logger.info('Using mask {mask} to filter files', mask=self.mask)
         logger.info(f'Using dates {date_from} and {date_to} to filter files')
         for record in self.read():
             path = record['path']
@@ -1518,18 +1564,19 @@ class Files(Model):
             if os.path.exists(dir) is True:
                 for file in os.listdir(dir):
                     path = os.path.join(dir, file)
-                    stats = os.stat(path)
-                    isdir, isfile, mtime, size = self.explore(stats)
-                    if isdir is True and self.recursive is True:
-                        yield from self.walk(dir=path)
-                    elif isfile is True or isdir is True:
-                        root = os.path.normpath(self.path)
-                        relpath = os.path.relpath(dir, self.path)
-                        row = dict(server=self.file_server, path=path,
-                                   root=root, dir=relpath, file=file,
-                                   isdir=isdir, isfile=isfile,
-                                   mtime=mtime, size=size)
-                        yield row
+                    if os.path.exists(path):
+                        stats = os.stat(path)
+                        isdir, isfile, mtime, size = self.explore(stats)
+                        if isdir is True and self.recursive is True:
+                            yield from self.walk(dir=path)
+                        elif isfile is True or isdir is True:
+                            root = os.path.normpath(self.path)
+                            relpath = os.path.relpath(dir, self.path)
+                            row = dict(server=self.file_server, path=path,
+                                       root=root, dir=relpath, file=file,
+                                       isdir=isdir, isfile=isfile,
+                                       mtime=mtime, size=size)
+                            yield row
         elif self.file_server.sftp is True:
             if self.file_server.exists(dir) is True:
                 conn = self.file_server.connect()
@@ -1562,7 +1609,7 @@ class Files(Model):
                     mtime = dt.datetime.strptime(mtime, '%Y%m%d%H%M%S')
                     size = conn.ftp.size(path)
                     row = dict(server=self.file_server, path=path,
-                               root=self.path, dir=relpath, filename=filename,
+                               root=self.path, dir=relpath, file=filename,
                                isdir=isdir, isfile=isfile,
                                mtime=mtime, size=size)
                     yield row
@@ -1577,10 +1624,12 @@ class Files(Model):
 
     def between(self):
         """Parse date range used for file filtering."""
-        calendar = getattr(self.pipeline, 'calendar', None) or calendar.Today()
+        values = calendar.Today()
+        if self.pipeline and self.pipeline.calendar:
+            values = self.pipeline.calendar
         minvalue = dt.datetime.min
         maxvalue = dt.datetime.max
-        namespace = {'calendar': calendar}
+        namespace = {'calendar': values}
         if isinstance(self.created, (dict, list, tuple)):
             if isinstance(self.created, dict):
                 date_from = self.created.get('date_from')
@@ -1590,7 +1639,7 @@ class Files(Model):
                 date_to = self.created[1]
             date_from = eval(date_from or 'None', namespace) or minvalue
             date_to = eval(date_to or 'None', namespace) or maxvalue
-        elif isinstance(self.created, str) is True:
+        elif isinstance(self.created, str):
             date_from = eval(self.created, namespace)
             date_to = maxvalue
         elif self.date_field:
@@ -1601,13 +1650,11 @@ class Files(Model):
             date_to = maxvalue
         return (date_from, date_to)
 
-    pass
-
 
 class Filenames(Files, Extractable, Model):
     """Represents file names as ETL model."""
 
-    def extract(self, step):
+    def extract(self):
         """Extract data with file description."""
         yield from self.filter()
 
@@ -1723,31 +1770,6 @@ class FileManager(Files, Executable, Model):
     def unzip(self, value):
         if isinstance(value, bool) or value is None:
             self._unzip = value
-
-    def createlog(self):
-        """Generate special logger."""
-        return self.pipeline.logging.file.setup()
-
-    def startlog(self, step, fileinfo):
-        """Start special logging."""
-        self.logger.root.table.new()
-        server_name = fileinfo['server'].host
-        file_name = fileinfo['file']
-        file_date = fileinfo['mtime']
-        file_size = fileinfo['size']
-        self.logger.table(job_id=self.job.id if self.job else None,
-                          run_id=self.job.record_id if self.job else None,
-                          task_id=self.task.id,
-                          step_id=step.id,
-                          server_name=server_name,
-                          file_name=file_name,
-                          file_date=file_date,
-                          file_size=file_size,
-                          start_date=dt.datetime.now())
-
-    def endlog(self):
-        """End special logging."""
-        self.logger.table(end_date=dt.datetime.now())
 
     def process(self, fileinfo):
         """Perform requested action for particular file."""
@@ -1887,10 +1909,6 @@ class FileManager(Files, Executable, Model):
         except Exception:
             logger.warning()
 
-    def prepare(self):
-        """Prepare model for ETL operation."""
-        self.logger = self.createlog()
-
     def execute(self, step):
         """Execute file manager action."""
         for fileinfo in self.filter():
@@ -1898,11 +1916,12 @@ class FileManager(Files, Executable, Model):
             bytes_volume = fileinfo['size']
             step.files_read = files_number
             step.bytes_read = bytes_volume
-            self.startlog(step, fileinfo)
+            self.begin(fileinfo)
             self.process(fileinfo)
-            self.endlog()
-            step.files_written = files_number
-            step.bytes_written = bytes_volume
+            self.finish()
+            if self.action in ('copy', 'move'):
+                step.files_written = files_number
+                step.bytes_written = bytes_volume
 
     def _copy_on_localhost(self, fileinfo):
         for path in self.destination:
@@ -2345,26 +2364,29 @@ class FileManager(Files, Executable, Model):
 
     def _delete_on_remote_by_ssh(self, fileinfo):
         remote = fileinfo['server']
+        conn = remote.connect()
         path = fileinfo['path']
         isfile = fileinfo['isfile']
         if isfile is True:
-            remote.execute(f'rm -f {path}')
+            conn.execute(f'rm -f {path}')
             logger.info(f'File {path} deleted')
 
     def _delete_on_remote_by_sftp(self, fileinfo):
         remote = fileinfo['server']
+        conn = remote.connect()
         path = fileinfo['path']
         isfile = fileinfo['isfile']
         if isfile is True:
-            remote.sftp.remove(path)
+            conn.sftp.remove(path)
             logger.info(f'File {path} deleted')
 
     def _delete_on_remote_by_ftp(self, fileinfo):
         remote = fileinfo['server']
+        conn = remote.connect()
         path = fileinfo['path']
         isfile = fileinfo['isfile']
         if isfile is True:
-            remote.ftp.delete(path)
+            conn.ftp.delete(path)
             logger.info(f'File {path} deleted')
 
     pass

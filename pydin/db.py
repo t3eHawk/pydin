@@ -41,7 +41,7 @@ class Database(pe.Database):
             self.run_history = self.load('pd_run_history')
             self.task_history = self.load('pd_task_history')
             self.step_history = self.load('pd_step_history')
-            self.sql_log = self.load('pd_sql_log')
+            self.sql_log = self.load('pd_query_log')
             self.file_log = self.load('pd_file_log')
             self.components = self.load('pd_components')
 
@@ -230,4 +230,5 @@ class Database(pe.Database):
 
 
 db = Database()
-if installed(): db.load()
+if installed():
+    db.load()

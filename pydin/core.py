@@ -24,25 +24,24 @@ import sqlalchemy as sa
 
 from .db import db
 from .config import config
-from .config import connector
-from .config import calendar
 from .logger import logger
+from .utils import calendar
+from .utils import connector
 
 from .utils import locate
 from .utils import declare, cache
 from .utils import importer, terminator
 from .utils import case, coalesce
 from .utils import first, last
-from .utils import to_boolean
-from .utils import to_datetime, to_timestamp
 from .utils import to_lower, to_upper
+from .utils import to_boolean, to_datetime, to_timestamp
 from .utils import to_thread, to_process, to_python
 from .utils import sql_preparer
 from .utils import get_version
-from .const import LINUX, MACOS, WINDOWS
 
-from .config import Logging
-from .config import Localhost, Server, Database
+from .utils import Logging
+from .sources import Localhost, Server, Database
+from .const import LINUX, MACOS, WINDOWS
 
 
 class Scheduler():
@@ -55,8 +54,8 @@ class Scheduler():
         self.name = name
         self.desc = desc
         self.owner = owner
-        app, desc, version = 'pydin.scheduler', 'PyDin Scheduler', get_version()
-        logger.configure(app=app, desc=desc, version=version)
+        app, desc = 'pydin.scheduler', 'PyDin Scheduler'
+        logger.configure(app=app, desc=desc, version=get_version())
         self.logger = logger
 
         self.moment = tm.time()
@@ -113,7 +112,7 @@ class Scheduler():
 
         def __init__(self, id, scheduler, name=None, desc=None, status=None,
                      mday=None, hour=None, min=None, sec=None,
-                     wday=None, yday=None, trigger_id=None,
+                     wday=None, yday=None, trigger_id=None, trigger_list=None,
                      start_timestamp=None, end_timestamp=None,
                      env=None, args=None, timeout=None, parallelism=None,
                      rerun_interval=None, rerun_period=None, rerun_done=None,
@@ -123,7 +122,9 @@ class Scheduler():
             self.id, self.scheduler = id, scheduler
             self.setup(name=name, desc=desc, status=status,
                        mday=mday, hour=hour, min=min, sec=sec,
-                       wday=wday, yday=yday, trigger_id=trigger_id,
+                       wday=wday, yday=yday,
+                       trigger_id=trigger_id,
+                       trigger_list=trigger_list,
                        start_timestamp=start_timestamp,
                        end_timestamp=end_timestamp,
                        env=env, args=args,
@@ -163,7 +164,7 @@ class Scheduler():
         @property
         def is_regular(self):
             """Check if the job is a regular type."""
-            if not self.trigger_id:
+            if not coalesce(self.trigger_id, self.trigger_list):
                 return True
             else:
                 return False
@@ -171,7 +172,7 @@ class Scheduler():
         @property
         def is_child(self):
             """Check if the job is a child of some other job."""
-            if self.trigger_id:
+            if coalesce(self.trigger_id, self.trigger_list):
                 return True
             else:
                 return False
@@ -199,6 +200,7 @@ class Scheduler():
                 wday=self.wday,
                 yday=self.yday,
                 trigger_id=self.trigger_id,
+                trigger_list=self.trigger_list,
                 start_timestamp=self.start_timestamp,
                 end_timestamp=self.end_timestamp,
                 env=self.env,
@@ -215,7 +217,7 @@ class Scheduler():
 
         def setup(self, name=None, desc=None, status=None,
                   mday=None, hour=None, min=None, sec=None,
-                  wday=None, yday=None, trigger_id=None,
+                  wday=None, yday=None, trigger_id=None, trigger_list=None,
                   start_timestamp=None, end_timestamp=None,
                   env=None, args=None, timeout=None, parallelism=None,
                   rerun_interval=None, rerun_period=None, rerun_done=None,
@@ -233,6 +235,7 @@ class Scheduler():
             self.wday = wday
             self.yday = yday
             self.trigger_id = trigger_id
+            self.trigger_list = trigger_list
             self.start_timestamp = to_timestamp(start_timestamp)
             self.end_timestamp = to_timestamp(end_timestamp)
             self.env = env
@@ -295,6 +298,7 @@ class Scheduler():
                        wday=record.weekday,
                        yday=record.yearday,
                        trigger_id=record.trigger_id,
+                       trigger_list=record.trigger_list,
                        start_timestamp=record.start_date,
                        end_timestamp=record.end_date,
                        env=record.environment,
@@ -836,13 +840,15 @@ class Scheduler():
             logger.debug('Schedule refresh procedure initiates right now')
             self.read()
         # Rerun failed jobs.
+        status = config['SCHEDULER']['rerun_enabled']
         interval = config['SCHEDULER']['rerun_interval']
-        if int(self.moment) % interval == 0:
+        if status and int(self.moment) % interval == 0:
             logger.debug('Rerun procedure initiates right now')
             self.rerun()
         # Finalize postponed jobs.
+        status = config['SCHEDULER']['wakeup_enabled']
         interval = config['SCHEDULER']['wakeup_interval']
-        if int(self.moment) % interval == 0:
+        if status and int(self.moment) % interval == 0:
             logger.debug('Wake Up procedure initiates right now')
             self.wake_up()
 
@@ -883,7 +889,7 @@ class Scheduler():
             n += 1
             found_jobs.append(job)
         logger.debug(f'Found {n} sleeping jobs: {found_jobs}')
-        logger.debug(f'List of sleeping jobs prepared')
+        logger.debug('List of sleeping jobs prepared')
 
     def _sked(self):
         # Read and parse the schedule from the database table.
@@ -942,14 +948,17 @@ class Scheduler():
     def _wake_up(self):
         # Define runs to be woken up from sleep and then executed.
         while True:
-            if self.waking_up.is_set() and self.count_sleeping():
-                logger.debug('Wake Up procedure starts...')
-                for queue in self.waiting_lists.values():
-                    if queue:
-                        job, tag = first(queue)
-                        self._regain_sleeping_job(job, tag)
-                logger.debug('Wake Up procedure completed')
-                self.waking_up.clear()
+            try:
+                if self.waking_up.is_set() and self.count_sleeping():
+                    logger.debug('Wake Up procedure starts...')
+                    for queue in self.waiting_lists.values():
+                        if queue:
+                            job, tag = first(queue)
+                            self._regain_sleeping_job(job, tag)
+                    logger.debug('Wake Up procedure completed')
+                    self.waking_up.clear()
+            except Exception:
+                logger.error()
             tm.sleep(1)
 
     def _charger(self):
@@ -1251,7 +1260,13 @@ class Job():
                 message = f'no such {self} having {run}'
                 raise ValueError(message)
         else:
-            self.tag = coalesce(args.tag, args.date, tag, date, tm.time())
+            self.trigger_id = coalesce(args.trigger, trigger_id)
+            if self.trigger_id:
+                self.trigger = db.record(history, self.trigger_id)
+                self.tag, self.data = self._inherit_from_parent()
+            else:
+                self.tag = coalesce(args.tag, args.date, tag, date, tm.time())
+                self.data = types.SimpleNamespace()
             self.added = None
             self.updated = None
             self.start_date = None
@@ -1260,13 +1275,9 @@ class Job():
             self.reruns = None
             self.seqno = None
             self.initiator_id = None
-            self.trigger_id = coalesce(args.trigger, trigger_id)
-            self.data = types.SimpleNamespace()
-        self.errors = set()
-
-        self.recycle_ind = 'Y' if self.args.recycle else None
         self.initiator = db.record(history, self.initiator_id)
-        self.trigger = db.record(history, self.trigger_id)
+        self.recycle_ind = 'Y' if self.args.recycle else None
+        self.errors = set()
 
         # Configure dependent objects.
         email_list = coalesce(email_list, schedule['email_list'])
@@ -1382,12 +1393,16 @@ class Job():
         return self.end_date-self.start_date
 
     @property
+    def data_dump(self):
+        """Get data dump."""
+        if self.data.__dict__:
+            return pickle.dumps(self.data)
+
+    @property
     def text_parameters(self):
         """."""
         if self.data:
             return json.dumps(self.data, sort_keys=True)
-        else:
-            return None
 
     @property
     def text_error(self):
@@ -1399,8 +1414,6 @@ class Job():
                 text = ''.join(exception)
                 text_list.append(text)
             return f'{"":->34}\n'.join(text_list)
-        else:
-            return None
 
     @property
     def pipeline(self):
@@ -1414,7 +1427,7 @@ class Job():
                 source_name = settings['source_name']
                 node_name = settings['node_name']
                 node_type = settings['node_type']
-                node_config = json.loads(settings['node_config'])
+                node_config = settings['node_config']
                 custom_query = settings['custom_query']
                 date_field = settings['date_field']
                 days_back = settings['days_back']
@@ -1427,6 +1440,7 @@ class Job():
                 chunk_size = settings['chunk_size']
                 cleanup = to_boolean(settings['cleanup'])
 
+                options = json.loads(node_config) if node_config else {}
                 constructor = getattr(models, node_type)
                 node = constructor(model_name=node_name,
                                    source_name=source_name,
@@ -1440,13 +1454,14 @@ class Job():
                                    key_field=key_field,
                                    chunk_size=chunk_size,
                                    cleanup=cleanup,
-                                   **node_config)
+                                   **options)
                 nodes.append(node)
             name = pipeline_settings['pipeline_name']
             error_limit = pipeline_settings['error_limit']
-            sql_logging = to_boolean(pipeline_settings['sql_logging'])
+            query_logging = to_boolean(pipeline_settings['query_logging'])
             file_logging = to_boolean(pipeline_settings['file_logging'])
-            logging = Logging(sql=sql_logging, file=file_logging)
+            logging = Logging(query_logging=query_logging,
+                              file_logging=file_logging)
             return Pipeline(*nodes, name=name, error_limit=error_limit,
                             logging=logging)
 
@@ -1482,8 +1497,8 @@ class Job():
         """Get pipeline nodes settings."""
         conn = db.connect()
         nc = db.tables.node_config
-        select = nc.select().where(nc.c.job_id == self.id).\
-                             order_by(nc.c.node_seqno)
+        select = nc.select().where(nc.c.job_id == self.id)\
+                            .order_by(nc.c.node_seqno)
         result = conn.execute(select)
         if result:
             return [dict(record) for record in result]
@@ -1514,7 +1529,7 @@ class Job():
         except Exception:
             self._fail()
         self._end()
-        self._trig()
+        self._trigger_child_jobs()
 
     def store(self, **kwargs):
         """Store the given arguments in a special job namespace."""
@@ -1651,7 +1666,7 @@ class Job():
         self.end_date = dt.datetime.now()
         self.record.write(end_date=self.end_date, status=self.status,
                           error_list=self.text_error,
-                          data_dump=pickle.dumps(self.data))
+                          data_dump=self.data_dump)
         if self.initiator_id:
             rerun_done = 'Y' if self.status == 'D' else None
             self.initiator.write(rerun_times=self.seqno,
@@ -1747,7 +1762,7 @@ class Job():
         signal.signal(signal.SIGTERM, self._shutdown)
         logger.debug(f'SIGTERM trigger set for current PID[{self.pid}]')
 
-    def _trig(self):
+    def _trigger_child_jobs(self):
         if self.status == 'D' and not self.solo:
             logger.debug(f'{self} checking for child jobs...')
             timestamp = tm.time()
@@ -1797,10 +1812,18 @@ class Job():
                 logger.debug(f'{self} no child jobs found')
         elif self.status != 'D':
             logger.debug(f'{self} child jobs were not triggered because of '
-                          'the parent job unsuccessful completion')
+                         'the parent job unsuccessful completion')
         elif self.solo:
             logger.debug(f'{self} child jobs were not triggered because of '
-                          'the solo parent job run')
+                         'the solo parent job run')
+
+    def _inherit_from_parent(self):
+        if self.trigger_id and self.trigger:
+            result = self.trigger.read()
+            tag = result.run_tag
+            dump = result.data_dump
+            data = pickle.loads(dump) if dump else types.SimpleNamespace()
+            return tag, data
 
     pass
 
@@ -2272,7 +2295,7 @@ class Task(Process):
     def setup(self, pipeline):
         """Configure the task for the given pipeline."""
         self.pipeline = pipeline
-        self.logger = self.pipeline.logging.task.setup()
+        self.logger = self.pipeline.logging.task.setup().logger
         logger.debug(f'Logger {self.logger.name} is used in {self} logging')
         logger.debug(f'{self} configured in {pipeline}')
 
@@ -2308,7 +2331,7 @@ class Task(Process):
                 task_id = record['id']
                 process_id = record['run_id']
                 status = record['status']
-                if status == 'D':
+                if status in ('D', 'E', 'T'):
                     for step in self.pipeline.walk():
                         if step.last.recyclable:
                             if step.last.key_field.associated(self.job):
@@ -2320,8 +2343,8 @@ class Task(Process):
                                 step.last.recycle(task_id)
                                 logger.debug(f'{step.last} recycled '
                                              f'by {task_id=}')
-                    update = th.update().values(status='C').\
-                                where(th.c.id == task_id)
+                    update = th.update().values(status='C')\
+                               .where(th.c.id == task_id)
                     conn.execute(update)
                     logger.debug(f'{self} recycled by {task_id=}')
 
@@ -2483,8 +2506,6 @@ class Step(Process, Unit):
             return 'EL'
         elif self.a.extractable and self.b.transformable and self.c.loadable:
             return 'ETL'
-        else:
-            return None
 
     @property
     def branch(self):
@@ -2495,8 +2516,6 @@ class Step(Process, Unit):
             return [self.a, self.b]
         elif self.a is not None and self.b is not None and self.c is not None:
             return [self.a, self.b, self.c]
-        else:
-            return None
 
     @property
     def first(self):
@@ -2521,8 +2540,6 @@ class Step(Process, Unit):
             return f'-->{branch[0]}-->'
         elif branch and self.type in ['EL', 'ETL']:
             return '-->'.join(branch)
-        else:
-            return None
 
     @property
     def status(self):
@@ -2736,7 +2753,7 @@ class Step(Process, Unit):
                 seqno += 1
                 name = f'{self.name}-{seqno}'
         self.pipeline.steps[name] = self
-        self.logger = self.pipeline.logging.step.setup(self)
+        self.logger = self.pipeline.logging.step.setup(self).logger
         logger.debug(f'Logger {self.logger.name} is used in {self} logging')
         logger.debug(f'{self} {self.branch} configured in {pipeline}')
 
@@ -2784,14 +2801,14 @@ class Step(Process, Unit):
             for record in self.history:
                 step_id = record['id']
                 status = record['status']
-                if status == 'D':
+                if status in ('D', 'E', 'T'):
                     if self.last.recyclable:
                         if self.last.key_field.associated(self):
                             self.last.recycle(step_id)
                             logger.debug(f'{self.last} recycled '
                                          f'by {step_id=}')
-                    update = sh.update().values(status='C').\
-                                where(sh.c.id == step_id)
+                    update = sh.update().values(status='C')\
+                               .where(sh.c.id == step_id)
                     conn.execute(update)
                     logger.debug(f'{self} recycled by {step_id=}')
 

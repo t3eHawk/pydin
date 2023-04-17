@@ -33,7 +33,7 @@ class Driver():
 
     def create_scheduler(self, name=None, desc=None, path=None):
         """Deploy scheduler with all necessary elements."""
-        logger.debug(f'Creating scheduler...')
+        logger.debug('Creating scheduler...')
         root = self.root if path is None else os.path.abspath(path)
         samples = os.path.join(os.path.dirname(__file__), 'samples')
         dir = self.jobs
@@ -63,7 +63,9 @@ class Driver():
                 'refresh_interval': '300',
                 'rerun_delay': '14400',
                 'rerun_interval': '60',
-                'wakeup_interval': '60'
+                'rerun_enabled': 'True',
+                'wakeup_interval': '60',
+                'wakeup_enabled': 'True'
             },
             'LOGGING': {
                 'console': 'True',
@@ -402,7 +404,7 @@ class Driver():
 
     def cancel_jobs(self):
         """Cancel all jobs."""
-        logger.debug(f'Requested to cancel all jobs...')
+        logger.debug('Requested to cancel all jobs...')
         conn = db.connect()
         table = db.tables.run_history
         select = table.select().where(table.c.status == 'R')
@@ -412,7 +414,7 @@ class Driver():
             run = row.id
             logger.debug(f'Found Job[{job}] running as Run[{run}]')
             self.cancel_run(run)
-        logger.debug(f'All jobs canceled')
+        logger.debug('All jobs canceled')
 
     def cancel_run(self, id):
         """Cancel particular run."""
@@ -531,7 +533,7 @@ class Driver():
             filename = 'gitignore'
             samples = os.path.join(os.path.dirname(__file__), 'samples')
             src = os.path.join(samples, f'{filename}.txt')
-            dest = os.path.join(self.jobs, f'.gitignore')
+            dest = os.path.join(self.jobs, '.gitignore')
             if os.path.exists(dest) is False:
                 content = open(src, 'r').read()
                 with open(dest, 'w') as fh:

@@ -71,7 +71,7 @@ create table pd_pipeline_config (
   pipeline_name varchar2(50 char),
   pipeline_desc varchar2(200 char),
   error_limit   number(*, 0) default 1,
-  sql_logging   varchar2(1 char) default 'Y',
+  query_logging varchar2(1 char) default 'Y',
   file_logging  varchar2(1 char) default 'Y',
   status        varchar2(1 char) default 'Y'
 );
@@ -281,7 +281,7 @@ begin
 end;
 /
 
-create table pd_sql_log (
+create table pd_query_log (
   id          number(*, 0),
   job_id      number(*, 0),
   run_id      number(*, 0),
@@ -298,19 +298,19 @@ create table pd_sql_log (
   output_text varchar2(4000 char),
   error_code  number(*, 0),
   error_text  varchar2(4000 char),
-  constraint pd_sql_log_pk primary key (id)
+  constraint pd_query_log_pk primary key (id)
 );
 
-create sequence pd_sql_log_seq
+create sequence pd_query_log_seq
 increment by 1
 start with 1
 nocache;
 
-create or replace trigger pd_sql_log_id_trg
-before insert on pd_sql_log
+create or replace trigger pd_query_log_id_trg
+before insert on pd_query_log
 for each row
 begin
-  select pd_sql_log_seq.nextval into :new.id from dual;
+  select pd_query_log_seq.nextval into :new.id from dual;
 end;
 /
 

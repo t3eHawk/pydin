@@ -55,7 +55,7 @@ create table pd_pipeline_config (
   pipeline_name text,
   pipeline_desc text,
   error_limit   integer default 1,
-  sql_logging   text default 'Y',
+  query_logging text default 'Y',
   file_logging  text default 'Y',
   status        text default 'Y'
   unique(job_id)
@@ -185,7 +185,7 @@ create table pd_file_log (
   end_date    text
 );
 
-create table pd_sql_log (
+create table pd_query_log (
   id          integer primary key autoincrement,
   job_id      integer,
   run_id      integer,
