@@ -97,9 +97,6 @@ class Configurator(dict):
             return False
 
 
-###############################################################################
-#                      Module level configuration objects
-###############################################################################
 config = Configurator()
 config.load([user_config, home_config, local_config])
 
