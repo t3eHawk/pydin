@@ -21,7 +21,7 @@ from .utils import get_job, get_logger, get_email, get_credentials
 
 from .fields import run_id, task_id, step_id, process_id
 
-__version__ = '0.1.15'
+__version__ = '0.2.0'
 __status__ = 'Production'
 
 __author__ = 'Timur Faradzhov'
