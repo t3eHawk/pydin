@@ -1,0 +1,26 @@
+    ____        ____  _
+   / __ \__  __/ __ \(_)___
+  / /_/ / / / / / / / / __ \
+ / ____/ /_/ / /_/ / / / / /
+/_/    \__, /_____/_/_/ /_/
+      /____/
+
+
+List of available commands:
+
+/api/start-scheduler  POST
+/api/stop-scheduler   POST
+
+/api/create-job       POST
+
+/api/enable-job       POST
+/api/disable-job      POST
+
+/api/run-job          POST
+/api/cancel-run       POST
+/api/deactivate-run   POST
+
+/api/sync-repo        POST
+
+/api/test             GET
+/api/help             GET

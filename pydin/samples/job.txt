@@ -1,0 +1,7 @@
+# PyDin Job file.
+
+import pydin
+
+
+if __name__ == '__main__':
+    job = pydin.Job()
