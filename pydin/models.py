@@ -1515,8 +1515,8 @@ class File(Extractable, Loadable, Model):
     @file_name.setter
     def file_name(self, value):
         if isinstance(value, str) or value is None:
-            self._file_name = tm.strftime(value) if value is not None else None
-            if self.file_name is not None:
+            self._file_name = time.strftime(value) if value else None
+            if self.file_name:
                 self.path = os.path.join(self._path, self._file_name)
 
     @property
@@ -1549,13 +1549,21 @@ class File(Extractable, Loadable, Model):
 
     def delete(self):
         """Delete all file data."""
-        open(self.path, 'w+').close()
-        logger.info(f'File {self.path} was completely purged')
+        if os.path.isfile(self.path):
+            logger.debug(f'File {self.path} will be completely purged')
+            open(self.path, 'w+').close()
+            logger.info(f'File {self.path} was completely purged')
+        elif os.path.isdir(self.path):
+            logger.debug(f'Directory {self.path} will be completely purged')
+            for filename in os.listdir(self.path):
+                path = os.path.join(self.path, filename)
+                if os.path.isfile(path):
+                    os.remove(path)
+            logger.info(f'Directory {self.path} was completely purged')
 
     def prepare(self):
         """Prepare model ETL operation."""
-        if self.cleanup is True:
-            logger.debug(f'File {self.path} will be completely purged')
+        if self.cleanup:
             self.delete()
 
     pass
@@ -1565,7 +1573,7 @@ class CSV(File):
     """Represents CSV file as ETL model."""
 
     def configure(self, file_name=None, path=None, encoding='utf-8',
-                  head=True, columns=None, delimiter=';', terminator='\r\n',
+                  head=True, columns=None, delimiter=';', terminator='\n',
                   enclosure=None, trim=False):
         super().configure(file_name=file_name, path=path, encoding=encoding)
         self.head = head
@@ -1653,36 +1661,129 @@ class CSV(File):
                    'skipinitialspace': skipinitialspace}
         return dialect
 
+    def counter(self, path):
+        """Count the number of records in the given CSV file."""
+        with open(path, 'r', encoding=self.encoding) as fh:
+            number = sum(1 for i in fh.read().split(self.terminator))
+            return number
+
+    def inspector(self, path):
+        """Inspect the propertioes of the given CSV file."""
+        if self.columns:
+            return self.columns
+        else:
+            view = self.viewer(path, limit=1)
+            if self.head:
+                return view[0]
+            else:
+                return [i[0] for i in enumerate(view[0])]
+
+    def viewer(self, path, limit=10):
+        """View the content of the given CSV file."""
+        with open(path, 'r', encoding=self.encoding) as fh:
+            input_records = fh.read().split(self.terminator)[0:limit]
+            output_records = []
+            for record in input_records:
+                values = record.split(self.delimiter)
+                output_records.append(values)
+            return output_records
+
+    def reader(self, path):
+        """Read data from the given CSV file."""
+        with open(path, 'r', encoding=self.encoding) as fh:
+            fieldnames = self.inspector(path) if not self.head else None
+            reader = csv.DictReader(fh, fieldnames, **self.dialect)
+            for record in reader:
+                yield record
+
+    def writer(self, path, data):
+        """Write data into the given CSV file."""
+        with open(path, 'a', encoding=self.encoding, newline='') as fh:
+            fieldnames = [el for el in data[0]]
+            writer = csv.DictWriter(fh, fieldnames, **self.dialect)
+            if self.head and not os.path.getsize(path):
+                writer.writeheader()
+            writer.writerows(data)
+
     def count(self):
         """Count the number of records in the source CSV file."""
-        with open(self.path, 'r', encoding=self.encoding) as fh:
-            reader = csv.DictReader(fh, self.columns, **self.dialect)
-            total = sum(1 for i in reader)
-            return total
+        return self.counter(self.path)
+
+    def first(self):
+        """Get the very first record from the source CSV file."""
+        view = self.viewer(self.path, 1)
+        return view[0]
+
+    def view(self, limit=10):
+        """View the source CSV file."""
+        return self.viewer(self.path, limit=limit)
 
     def extract(self):
-        """Extract data from CSV file."""
-        with open(self.path, 'r', encoding=self.encoding) as fh:
-            reader = csv.DictReader(fh, self.columns, **self.dialect)
-            total = self.count()
-            chunk = []
+        """Extract data from the CSV file."""
+        total_number = self.counter(self.path)
+        records = self.reader(self.path)
+        i = 1
+        chunk = []
+        for record in records:
+            chunk.append(record)
+            if i % self.chunk_size == 0 or i == total_number:
+                yield chunk
+                chunk = []
+            i += 1
+
+    def load(self, dataset):
+        """Load data into the CSV file."""
+        return self.writer(self.path, dataset)
+
+    def itemize(self):
+        """Generate parameters for data streams."""
+        if os.path.isfile(self.path):
+            yield {'path': self.path}
+        elif os.path.isdir(self.path):
+            for filename in os.listdir(self.path):
+                if not filename.startswith('.'):
+                    path = os.path.join(self.path, filename)
+                    yield {'path': path}
+
+    def parametrize(self, tag, payload):
+        """Generate parameters for data stream."""
+        if os.path.isfile(self.path):
+            return {'path': self.path}
+        elif os.path.isdir(self.path):
+            filename = f'{tag}.csv'
+            path = os.path.join(self.path, filename)
+            return {'path': path}
+
+    class DataStream(DataStream):
+
+        def configure(self, path):
+            """Configure CSV file of this data stream."""
+            self.path = path
+
+        def identify(self):
+            """Identify CSV file of this data stream."""
+            return os.path.splitext(os.path.basename(self.path))[0]
+
+        def detail(self):
+            """Detail CSV file of this data stream."""
+            return {'path': self.path}
+
+        def extract(self):
+            """Extract data from the CSV file of this data stream."""
+            total_number = self.model.counter(self.path)
+            records = self.model.reader(self.path)
             i = 1
-            for record in reader:
+            chunk = []
+            for record in records:
                 chunk.append(record)
-                if i % self.chunk_size == 0 or i == total:
+                if i % self.model.chunk_size == 0 or i == total_number:
                     yield chunk
                     chunk = []
                 i += 1
 
-    def load(self, dataset):
-        """Load data to CSV file."""
-        with open(self.path, 'a', encoding=self.encoding, newline='') as fh:
-            dialect = self.dialect
-            fieldnames = [el for el in dataset[0]]
-            writer = csv.DictWriter(fh, fieldnames, **dialect)
-            if self.head is True and self.empty:
-                writer.writeheader()
-            writer.writerows(dataset)
+        def load(self, dataset):
+            """Load data into the CSV file of this data stream."""
+            return self.model.writer(self.path, dataset)
 
     pass
 
