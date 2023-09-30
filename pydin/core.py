@@ -2706,30 +2706,43 @@ class Step(Process, Unit):
             self.logger.table(result_long=str(self.result_long))
 
     @property
-    def extraction(self):
-        """Get extraction state."""
-        if self.type in ['ETL', 'EL'] and self.a.thread.is_alive() is True:
-            return True
-        else:
-            return False
+    def alive(self):
+        """Check if the base data source of this step is not finished."""
+        if self.type in ['ETL', 'EL']:
+            return self.a.returns
+        return False
 
     @property
-    def transformation(self):
-        """Get transformation state."""
-        if self.type == 'ETL' and self.b.thread.is_alive() is True:
+    def extracting(self):
+        """Check the extraction status of this step."""
+        if self.type in ['ETL', 'EL'] and self.a.thread.is_alive():
             return True
-        else:
-            return False
+        return False
+
+    @property
+    def transforming(self):
+        """Check the transformation status of this step."""
+        if self.type == 'ETL' and self.b.thread.is_alive():
+            return True
+        return False
+
+    @property
+    def processing(self):
+        """Check the data processing status of this step."""
+        if self.queue.empty():
+            if not self.extracting and not self.transforming:
+                return False
+            return True
+        return True
 
     @property
     def loading(self):
-        """Get loading state."""
-        if self.type == 'ETL' and self.c.thread.is_alive() is True:
+        """Check the loading status of this step."""
+        if self.type == 'ETL' and self.c.thread.is_alive():
             return True
-        if self.type == 'EL' and self.b.thread.is_alive() is True:
+        elif self.type == 'EL' and self.b.thread.is_alive():
             return True
-        else:
-            return False
+        return False
 
     def setup(self, pipeline):
         """Configure the step for the given pipeline."""

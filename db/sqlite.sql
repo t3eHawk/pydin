@@ -57,7 +57,7 @@ create table pd_pipeline_config (
   error_limit   integer default 1,
   query_logging text default 'Y',
   file_logging  text default 'Y',
-  status        text default 'Y'
+  status        text default 'Y',
   unique(job_id)
 );
 
