@@ -1,16 +1,21 @@
 """Contains built-in models and prototypes."""
 
-import csv
-import datetime as dt
-import gzip
-import json
 import os
-import re
-import shutil
 import stat
-import tempfile
+import shutil
+
+import re
+import time
+import datetime as dt
+
+import queue
 import threading as th
-import time as tm
+
+import csv
+import json
+import gzip
+import tempfile
+
 import xml.etree.ElementTree as xet
 import xml.dom.minidom as xdom
 
@@ -21,10 +26,10 @@ from .logger import logger
 from .utils import calendar
 from .utils import connector
 
-from .utils import to_sql
-from .utils import coalesce
+from .utils import pause
+from .utils import coalesce, timedelta
 from .utils import read_file_or_string
-from .utils import sql_formatter, sql_compiler, sql_converter
+from .utils import to_sql, sql_formatter, sql_compiler, sql_converter
 
 from .core import Node
 from .sources import Localhost, Server, Database
@@ -44,8 +49,18 @@ class Model(Node):
                  value_field=None, target_value=None,
                  min_value=None, max_value=None,
                  key_field=None, insert_key_field=True,
-                 chunk_size=1000, cleanup=False, **kwargs):
+                 chunk_size=1000, parallelism=0, cleanup=False, **kwargs):
         super().__init__(node_name=model_name, source_name=source_name)
+        self.workers = []
+        self.lock = th.Lock()
+        self.object_queue = queue.Queue()
+        self.data_queue = queue.Queue()
+        self.extractions_done = 0
+        self.transformations_done = 0
+        self.loadings_done = 0
+        self.datastream_number = 0
+        self.total_records = 0
+        self.total_duration = 0
         self.custom_query = custom_query
         if date_field:
             self.date_field = date_field
@@ -60,6 +75,7 @@ class Model(Node):
         self.key_field = key_field(self) if key_field else None
         self.insert_key_field = insert_key_field
         self.chunk_size = chunk_size
+        self.parallelism = parallelism
         self.cleanup = cleanup
         self.configure(*args, **kwargs)
 
@@ -75,6 +91,66 @@ class Model(Node):
     @property
     def model_type(self):
         return self.__class__.__name__
+
+    @property
+    def returns(self):
+        """Check if the data source is still has something to return."""
+        if self.parallelism:
+            return self.queuing
+        elif not self.parallelism:
+            return self.passed
+        return False
+
+    @property
+    def queuing(self):
+        """Check if data objects are being queued at the moment."""
+        if not self.object_queue.empty() or not self.data_queue.empty():
+            return True
+        return False
+
+    @property
+    def passed(self):
+        """Check if data object is passed and has nothing to return."""
+        if not self.parallelism and not self.extractions_done:
+            return True
+        return False
+
+    @property
+    def extracting(self):
+        """Get current extraction state."""
+        raise NotImplementedError
+
+    @property
+    def transforming(self):
+        """Get current transformation state."""
+        raise NotImplementedError
+
+    @property
+    def loading(self):
+        """Get current loading state."""
+        raise NotImplementedError
+
+    @property
+    def working(self):
+        """Check if data workers are doing something at the moment."""
+        for worker in self.workers:
+            if worker.is_alive():
+                return True
+        return False
+
+    @property
+    def recyclable(self):
+        """Identifies if the model is recyclable type or not."""
+        if hasattr(self, 'recycle'):
+            return True
+        return False
+
+    @property
+    def speed(self):
+        """Calculate total operations speed of this model."""
+        if self.total_records and self.total_duration:
+            return round(self.total_records/self.total_duration)
+        return 0
 
     @property
     def key_field(self):
@@ -178,13 +254,6 @@ class Model(Node):
             elif isinstance(self, (File, Files)):
                 return self.pipeline.logging.file
 
-    @property
-    def recyclable(self):
-        """Identifies if the model is recyclable type or not."""
-        if hasattr(self, 'recycle'):
-            return True
-        return False
-
     def configure(self, *args, **kwargs):
         """Configure this ETL model."""
         raise NotImplementedError
@@ -215,27 +284,44 @@ class Model(Node):
         if self.logging:
             self.logging.end(self, *args, **kwargs)
 
-    def explain(self, parameter_name=None):
-        """Get model or chosen parameter description."""
-        if not parameter_name:
-            return self.__doc__
-        else:
-            attribute = getattr(self, parameter_name)
-            if attribute:
-                return attribute.__doc__
+    def parallelize(self, target_operation, *args, **kwargs):
+        """Prepare the data workers used for parallel operations."""
+        parent = th.current_thread()
+        params = {'args': args, 'kwargs': kwargs}
+        for i in range(self.parallelism):
+            seqno = i+1
+            name = f'{parent.name}-{seqno}'
+            worker = th.Thread(name=name, target=target_operation, **params)
+            worker.start()
+            self.workers.append(worker)
+        return True
 
-    def process(self, dataset):
-        """Process dataset if necessary."""
-        if self.key_field and self.insert_key_field:
-            for record in dataset:
-                record[self.key_field.label] = self.key_field.value
-        return dataset
+    def wait(self):
+        """Wait until all data workers are done."""
+        for worker in self.workers:
+            worker.join()
+
+    def itemize(self):
+        """Generate an item table with the data stream parameters."""
+
+    def parametrize(self):
+        """Generate parameters for the data stream."""
+
+    def charge(self):
+        """Queue the data objects returned by the data listing function."""
+        for data_object in self.itemize():
+            self.object_queue.put(data_object)
+        return True
 
     def get_last_value(self):
         """Get last loaded value of this model."""
         if hasattr(self, 'value_field'):
             if hasattr(self, '_get_last_value'):
                 return self._get_last_value()
+
+    def get_custom_query(self):
+        """Get custom query."""
+        return self.custom_query
 
     def read_custom_query(self, value):
         """Read custom query."""
@@ -253,6 +339,41 @@ class Model(Node):
             else:
                 return value
 
+    def enrich(self, dataset):
+        """Enrich dataset with some configurable modifications."""
+        if self.key_field and self.insert_key_field:
+            for record in dataset:
+                record[self.key_field.label] = self.key_field.value
+        return dataset
+
+    def first(self):
+        """Get the very first record from the data object."""
+        raise NotImplementedError
+
+    def count(self):
+        """Get the total number of records in the data object."""
+        raise NotImplementedError
+
+    def volume(self):
+        """Get the volume of the data object."""
+        raise NotImplementedError
+
+    def pack(self, something, tag=None, payload=None):
+        """Pack the given data into the special data package."""
+        if isinstance(something, DataPackage):
+            return something
+        datapack = DataPackage(tag=tag, data=something, payload=payload)
+        return datapack
+
+    def explain(self, parameter_name=None):
+        """Get model or chosen parameter description."""
+        if not parameter_name:
+            return self.__doc__
+        else:
+            parameter = getattr(self, parameter_name)
+            if parameter:
+                return parameter.__doc__
+
 
 class Extractable():
     """Represents extractable model."""
@@ -260,39 +381,95 @@ class Extractable():
     extractable = True
 
     def to_extractor(self, step, queue):
-        """Start model extractor."""
+        """Start base extractor."""
         name = f'{self}-Extractor'
-        target, args = self.extractor, (step, queue)
+        target, args = self.target_extractor(), (step, queue)
         thread = th.Thread(name=name, target=target, args=args, daemon=True)
         logger.debug(f'Starting {thread.name}...')
-        step.threads.append(thread)
-        self.step = step
-        self.thread = thread
+        self.step, self.thread = step, thread
+        self.step.threads.append(thread)
         return self.thread.start()
 
     def extractor(self, step, queue):
-        """Extract data."""
+        """Extract data into the queue."""
         logger.info(f'Reading records from {self}...')
-        try:
-            for dataset in self.extract():
-                try:
-                    queue.put(dataset)
-                    step.records_read = len(dataset)
-                    logger.info(f'{step.records_read} records read')
-                except Exception:
-                    step.records_error = len(dataset)
-                    logger.info(f'{step.records_error} records with error')
-                    logger.error()
-                    step.error_handler()
-                    if len(step.errors) >= step.pipeline.error_limit:
-                        break
-        except Exception:
-            logger.error()
-            step.error_handler()
+        while step.alive:
+            try:
+                for dataset in self.target_extract():
+                    start_date = dt.datetime.now()
+                    datapack = self.pack(dataset)
+                    size = datapack.calculate()
+                    try:
+                        queue.put(datapack)
+                        with self.lock:
+                            step.records_read = size
+                            self.total_records += size
+                            self.total_duration += timedelta(start_date)
+                        logger.info(f'{step.records_read} records read, '
+                                    f'{self.total_duration:.4f} sec, '
+                                    f'{self.speed} rec/sec')
+                    except Exception:
+                        with self.lock:
+                            step.records_error = size
+                        logger.info(f'{step.records_error} records with error')
+                        logger.error()
+                        step.error_handler()
+                        if len(step.errors) >= step.pipeline.error_limit:
+                            break
+            except Exception:
+                logger.error()
+                step.error_handler()
+            with self.lock:
+                self.extractions_done += 1
+            pause()
 
     def extract(self):
-        """Base extract method."""
+        """Extract data from the data source."""
         raise NotImplementedError
+
+    def extracts(self, step):
+        """Get an extractor for parallel operations."""
+        if self.parallelism:
+            return self.extractor(step, self.data_queue)
+
+    def extractors(self, step, queue):
+        """Extract data from the data source in a parallel mode."""
+        if self.parallelism:
+            if self.charge():
+                if self.parallelize(self.extracts, step):
+                    while self.working:
+                        try:
+                            if not self.data_queue.empty():
+                                datapack = self.data_queue.get()
+                                queue.put(datapack)
+                                self.data_queue.task_done()
+                        except Exception:
+                            logger.error()
+                        pause()
+                    self.wait()
+
+    def extract_many(self):
+        """Extract data from the data stream."""
+        while not self.object_queue.empty():
+            parameters = self.object_queue.get()
+            data_stream = self.DataStream(self, **parameters)
+            tag, payload = data_stream.identify(), data_stream.detail()
+            for dataset in data_stream.extract():
+                datapack = self.pack(dataset, tag=tag, payload=payload)
+                yield datapack
+            pause()
+
+    def target_extractor(self):
+        """Get target extraction handler."""
+        if self.parallelism:
+            return self.extractors
+        return self.extractor
+
+    def target_extract(self):
+        """Get target extraction method."""
+        if self.parallelism:
+            return self.extract_many()
+        return self.extract()
 
 
 class Transformable():
@@ -301,34 +478,38 @@ class Transformable():
     transformable = True
 
     def to_transformer(self, step, input_queue, output_queue):
-        """Start model transformer."""
+        """Start base transformer."""
         name = f'{self}-Transformer'
         target, args = self.transformator, (step, input_queue, output_queue)
         thread = th.Thread(name=name, target=target, args=args, daemon=True)
         logger.debug(f'Starting {thread.name}...')
-        step.threads.append(thread)
-        self.step = step
-        self.thread = thread
+        self.step, self.thread = step, thread
+        self.step.threads.append(thread)
         return self.thread.start()
 
     def transformator(self, step, input_queue, output_queue):
-        """Transform data."""
+        """Transform data from the input queue to the output queue."""
         logger.info(f'Processing records of {self}...')
-        while True:
-            if input_queue.empty():
-                if step.extraction:
-                    tm.sleep(0.001)
-                    continue
-                break
-            else:
-                input_dataset = input_queue.get()
+        while step.extracting or not input_queue.empty():
+            if not input_queue.empty():
+                start_date = dt.datetime.now()
+                datapack = input_queue.get()
+                input_dataset = datapack.get()
+                size = datapack.calculate()
                 try:
                     output_dataset = list(map(self.transform, input_dataset))
-                    output_queue.put(output_dataset)
-                    step.records_processed = len(output_dataset)
-                    logger.info(f'{step.records_processed} records processed')
+                    datapack.put(output_dataset)
+                    output_queue.put(datapack)
+                    with self.lock:
+                        step.records_processed = size
+                        self.total_records += size
+                        self.total_duration += timedelta(start_date)
+                    logger.info(f'{step.records_processed} records processed, '
+                                f'{self.total_duration:.4f} sec, '
+                                f'{self.speed} rec/sec')
                 except Exception:
-                    step.records_error = len(input_dataset)
+                    with self.lock:
+                        step.records_error = datapack.size
                     logger.info(f'{step.records_error} records with error')
                     logger.error()
                     step.error_handler()
@@ -336,9 +517,12 @@ class Transformable():
                         break
                 else:
                     input_queue.task_done()
+            with self.lock:
+                self.transformations_done += 1
+            pause()
 
     def transform(self):
-        """Base transform method."""
+        """Transform data from one data source for another."""
         raise NotImplementedError
 
 
@@ -348,34 +532,38 @@ class Loadable():
     loadable = True
 
     def to_loader(self, step, queue):
-        """Start model loader."""
+        """Start base loader."""
         name = f'{self}-Loader'
-        target, args = self.loader, (step, queue)
+        target, args = self.target_loader(), (step, queue)
         thread = th.Thread(name=name, target=target, args=args, daemon=True)
         logger.debug(f'Starting {thread.name}...')
-        step.threads.append(thread)
-        self.step = step
-        self.thread = thread
+        self.step, self.thread = step, thread
+        self.step.threads.append(thread)
         return self.thread.start()
 
     def loader(self, step, queue):
-        """Load data."""
+        """Load data from the queue."""
         logger.info(f'Writing records to {self}...')
-        while True:
-            if queue.empty() is True:
-                if step.extraction is True or step.transformation is True:
-                    tm.sleep(0.001)
-                    continue
-                break
-            else:
-                dataset = queue.get()
+        while step.processing or not queue.empty():
+            if not queue.empty():
+                start_date = dt.datetime.now()
+                datapack = queue.get()
+                size = datapack.calculate()
                 try:
-                    dataset = self.process(dataset)
-                    result = self.load(dataset)
-                    step.records_written = len(coalesce(result, dataset))
-                    logger.info(f'{step.records_written} records written')
+                    initial_data = datapack.get()
+                    final_data = self.enrich(initial_data)
+                    datapack.put(final_data)
+                    result = self.target_load(datapack)
+                    with self.lock:
+                        step.records_written = coalesce(result, size)
+                        self.total_records += size
+                        self.total_duration += timedelta(start_date)
+                    logger.info(f'{step.records_written} records written, '
+                                f'{self.total_duration:.4f} sec, '
+                                f'{self.speed} rec/sec')
                 except Exception:
-                    step.records_error = len(dataset)
+                    with self.lock:
+                        step.records_error = size
                     logger.info(f'{step.records_error} records with error')
                     logger.error()
                     step.error_handler()
@@ -383,10 +571,54 @@ class Loadable():
                         break
                 else:
                     queue.task_done()
+            with self.lock:
+                self.loadings_done += 1
+            pause()
 
     def load(self, dataset):
-        """Base load method."""
+        """Load data into the data source."""
         raise NotImplementedError
+
+    def loads(self, step):
+        """Get a loader for parallel operations."""
+        if self.parallelism:
+            return self.loader(step, self.data_queue)
+
+    def loaders(self, step, queue):
+        """Load data into the data source in a parallel mode."""
+        if self.parallelism:
+            if self.parallelize(self.loads, step):
+                while step.processing or not queue.empty():
+                    try:
+                        if not queue.empty():
+                            datapack = queue.get()
+                            self.data_queue.put(datapack)
+                            queue.task_done()
+                    except Exception:
+                        logger.error()
+                    pause()
+                self.wait()
+
+    def load_many(self, datapack):
+        """Load data into the data stream."""
+        if self.parallelism:
+            tag, dataset, payload = datapack.expand()
+            parameters = self.parametrize(tag, payload)
+            data_stream = self.DataStream(self, **parameters)
+            result = data_stream.load(dataset)
+            return result
+
+    def target_loader(self):
+        """Get target loading handler."""
+        if self.parallelism:
+            return self.loaders
+        return self.loader
+
+    def target_load(self, datapack):
+        """Get target loading method."""
+        if self.parallelism:
+            return self.load_many(datapack)
+        return self.load(datapack.data)
 
 
 class Executable():
@@ -419,6 +651,85 @@ class Executable():
 
     def execute(self, step):
         """Base execute method."""
+        raise NotImplementedError
+
+
+class DataPackage:
+    """Represents a single data package transferred over a pipeline."""
+
+    def __init__(self, tag=None, data=None, payload=None):
+        self.tag = tag
+        self.data = data
+        self.payload = payload
+
+    def __len__(self):
+        if self.data and isinstance(self.data, list):
+            return len(self.data)
+        return 0
+
+    @property
+    def size(self):
+        """Get the size of the data in this package."""
+        return self.calculate()
+
+    def identify(self, tag):
+        """Give the tag to this data package."""
+        self.tag = tag
+
+    def parametrize(self, payload):
+        """Add some payload to this data package."""
+        self.payload = payload
+
+    def put(self, data):
+        """Put data inside this package."""
+        self.data = data
+
+    def get(self):
+        """Get data from this package."""
+        return self.data
+
+    def calculate(self):
+        """Calclulate the size of the data in this package."""
+        return len(self)
+
+    def expand(self):
+        """Expand this data package into the list."""
+        return [self.tag, self.data, self.payload]
+
+
+class DataStream:
+    """Represents a separate data stream within a data object."""
+
+    def __init__(self, model, *args, **kwargs):
+        self.model = model
+        with self.model.lock:
+            self.model.datastream_number += 1
+            self.seqno = self.model.datastream_number
+        self.configure(*args, **kwargs)
+
+    @property
+    def tag(self):
+        """Get data stream tag."""
+        return self.identify()
+
+    def configure(self, *args, **kwargs):
+        """Configure this data stream."""
+        raise NotImplementedError
+
+    def identify(self):
+        """Identify this data stream with a tag."""
+        raise NotImplementedError
+
+    def detail(self):
+        """Detail this data stream with some properties."""
+        raise NotImplementedError
+
+    def extract(self):
+        """Extract data from this data stream."""
+        raise NotImplementedError
+
+    def load(self):
+        """Load data into this data stream."""
         raise NotImplementedError
 
 
@@ -1204,8 +1515,8 @@ class File(Extractable, Loadable, Model):
     @file_name.setter
     def file_name(self, value):
         if isinstance(value, str) or value is None:
-            self._file_name = tm.strftime(value) if value is not None else None
-            if self.file_name is not None:
+            self._file_name = time.strftime(value) if value else None
+            if self.file_name:
                 self.path = os.path.join(self._path, self._file_name)
 
     @property
@@ -1238,13 +1549,21 @@ class File(Extractable, Loadable, Model):
 
     def delete(self):
         """Delete all file data."""
-        open(self.path, 'w+').close()
-        logger.info(f'File {self.path} was completely purged')
+        if os.path.isfile(self.path):
+            logger.debug(f'File {self.path} will be completely purged')
+            open(self.path, 'w+').close()
+            logger.info(f'File {self.path} was completely purged')
+        elif os.path.isdir(self.path):
+            logger.debug(f'Directory {self.path} will be completely purged')
+            for filename in os.listdir(self.path):
+                path = os.path.join(self.path, filename)
+                if os.path.isfile(path):
+                    os.remove(path)
+            logger.info(f'Directory {self.path} was completely purged')
 
     def prepare(self):
         """Prepare model ETL operation."""
-        if self.cleanup is True:
-            logger.debug(f'File {self.path} will be completely purged')
+        if self.cleanup:
             self.delete()
 
     pass
@@ -1254,7 +1573,7 @@ class CSV(File):
     """Represents CSV file as ETL model."""
 
     def configure(self, file_name=None, path=None, encoding='utf-8',
-                  head=True, columns=None, delimiter=';', terminator='\r\n',
+                  head=True, columns=None, delimiter=';', terminator='\n',
                   enclosure=None, trim=False):
         super().configure(file_name=file_name, path=path, encoding=encoding)
         self.head = head
@@ -1342,36 +1661,129 @@ class CSV(File):
                    'skipinitialspace': skipinitialspace}
         return dialect
 
+    def counter(self, path):
+        """Count the number of records in the given CSV file."""
+        with open(path, 'r', encoding=self.encoding) as fh:
+            number = sum(1 for i in fh.read().split(self.terminator))
+            return number
+
+    def inspector(self, path):
+        """Inspect the propertioes of the given CSV file."""
+        if self.columns:
+            return self.columns
+        else:
+            view = self.viewer(path, limit=1)
+            if self.head:
+                return view[0]
+            else:
+                return [i[0] for i in enumerate(view[0])]
+
+    def viewer(self, path, limit=10):
+        """View the content of the given CSV file."""
+        with open(path, 'r', encoding=self.encoding) as fh:
+            input_records = fh.read().split(self.terminator)[0:limit]
+            output_records = []
+            for record in input_records:
+                values = record.split(self.delimiter)
+                output_records.append(values)
+            return output_records
+
+    def reader(self, path):
+        """Read data from the given CSV file."""
+        with open(path, 'r', encoding=self.encoding) as fh:
+            fieldnames = self.inspector(path) if not self.head else None
+            reader = csv.DictReader(fh, fieldnames, **self.dialect)
+            for record in reader:
+                yield record
+
+    def writer(self, path, data):
+        """Write data into the given CSV file."""
+        with open(path, 'a', encoding=self.encoding, newline='') as fh:
+            fieldnames = [el for el in data[0]]
+            writer = csv.DictWriter(fh, fieldnames, **self.dialect)
+            if self.head and not os.path.getsize(path):
+                writer.writeheader()
+            writer.writerows(data)
+
     def count(self):
         """Count the number of records in the source CSV file."""
-        with open(self.path, 'r', encoding=self.encoding) as fh:
-            reader = csv.DictReader(fh, self.columns, **self.dialect)
-            total = sum(1 for i in reader)
-            return total
+        return self.counter(self.path)
+
+    def first(self):
+        """Get the very first record from the source CSV file."""
+        view = self.viewer(self.path, 1)
+        return view[0]
+
+    def view(self, limit=10):
+        """View the source CSV file."""
+        return self.viewer(self.path, limit=limit)
 
     def extract(self):
-        """Extract data from CSV file."""
-        with open(self.path, 'r', encoding=self.encoding) as fh:
-            reader = csv.DictReader(fh, self.columns, **self.dialect)
-            total = self.count()
-            chunk = []
+        """Extract data from the CSV file."""
+        total_number = self.counter(self.path)
+        records = self.reader(self.path)
+        i = 1
+        chunk = []
+        for record in records:
+            chunk.append(record)
+            if i % self.chunk_size == 0 or i == total_number:
+                yield chunk
+                chunk = []
+            i += 1
+
+    def load(self, dataset):
+        """Load data into the CSV file."""
+        return self.writer(self.path, dataset)
+
+    def itemize(self):
+        """Generate parameters for data streams."""
+        if os.path.isfile(self.path):
+            yield {'path': self.path}
+        elif os.path.isdir(self.path):
+            for filename in os.listdir(self.path):
+                if not filename.startswith('.'):
+                    path = os.path.join(self.path, filename)
+                    yield {'path': path}
+
+    def parametrize(self, tag, payload):
+        """Generate parameters for data stream."""
+        if os.path.isfile(self.path):
+            return {'path': self.path}
+        elif os.path.isdir(self.path):
+            filename = f'{tag}.csv'
+            path = os.path.join(self.path, filename)
+            return {'path': path}
+
+    class DataStream(DataStream):
+
+        def configure(self, path):
+            """Configure CSV file of this data stream."""
+            self.path = path
+
+        def identify(self):
+            """Identify CSV file of this data stream."""
+            return os.path.splitext(os.path.basename(self.path))[0]
+
+        def detail(self):
+            """Detail CSV file of this data stream."""
+            return {'path': self.path}
+
+        def extract(self):
+            """Extract data from the CSV file of this data stream."""
+            total_number = self.model.counter(self.path)
+            records = self.model.reader(self.path)
             i = 1
-            for record in reader:
+            chunk = []
+            for record in records:
                 chunk.append(record)
-                if i % self.chunk_size == 0 or i == total:
+                if i % self.model.chunk_size == 0 or i == total_number:
                     yield chunk
                     chunk = []
                 i += 1
 
-    def load(self, dataset):
-        """Load data to CSV file."""
-        with open(self.path, 'a', encoding=self.encoding, newline='') as fh:
-            dialect = self.dialect
-            fieldnames = [el for el in dataset[0]]
-            writer = csv.DictWriter(fh, fieldnames, **dialect)
-            if self.head is True and self.empty:
-                writer.writeheader()
-            writer.writerows(dataset)
+        def load(self, dataset):
+            """Load data into the CSV file of this data stream."""
+            return self.model.writer(self.path, dataset)
 
     pass
 

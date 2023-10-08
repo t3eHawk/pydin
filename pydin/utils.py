@@ -6,6 +6,7 @@ import signal
 import ctypes
 
 import re
+import time
 import datetime as dt
 import calendar as cnd
 
@@ -23,7 +24,7 @@ import sqlalchemy.dialects as sad
 import sqlparse as spa
 
 from .sources import Server, Database
-from .const import LINUX, MACOS, WINDOWS
+from .const import LINUX, MACOS, WINDOWS, PAUSE_TIME
 from .wrap import classproperty, staticproperty
 
 
@@ -98,6 +99,11 @@ def terminator(pid):
         kernel.AttachConsole(pid)
         kernel.SetConsoleCtrlHandler(None, 1)
         kernel.GenerateConsoleCtrlEvent(0, 0)
+
+
+def pause():
+    """Pause programm."""
+    time.sleep(PAUSE_TIME)
 
 
 def case(value, *options):
@@ -282,6 +288,14 @@ def to_upper(value):
 def camel_to_human(s):
     """Conver CamelCase style into ordinary human text."""
     return ''.join([' '+c if c.isupper() else c for c in s]).lstrip()
+
+
+def timedelta(start_date, end_date=None):
+    """Calculate time delta represented as seconds."""
+    end_date = end_date or dt.datetime.now()
+    duration = end_date-start_date
+    delta = duration.seconds+duration.microseconds/100000
+    return delta
 
 
 def to_sql(text):
